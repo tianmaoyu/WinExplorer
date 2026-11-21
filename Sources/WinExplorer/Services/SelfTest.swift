@@ -1510,6 +1510,45 @@ enum SelfTest {
               "rows=\(model.treeRows.map(\.item.name))")
         model.toggleExpanded(moveDst)
 
+        // 选中子层里的项后执行删除：必须真的生效（adr/0022）
+        let deepDir = treeRoot.appendingPathComponent("deepsel")
+        let deepInner = deepDir.appendingPathComponent("inner")
+        try? fm.createDirectory(at: deepInner, withIntermediateDirectories: true)
+        let deepFile = deepInner.appendingPathComponent("doomed.txt")
+        fm.createFile(atPath: deepFile.path, contents: Data("x".utf8))
+
+        model.navigate(to: treeRoot)
+        model.toggleExpanded(deepDir)
+        waitForChildren(deepDir)
+        model.toggleExpanded(deepInner)
+        waitForChildren(deepInner)
+
+        if let deepRow = model.treeRows.first(where: { $0.item.name == "doomed.txt" }) {
+            check("选中项同步：子层项也算选中", true)
+            model.selectOnly(deepRow.item)
+            check("子层选中：selectedItems 不是空的",
+                  model.selectedItems.count == 1, "count=\(model.selectedItems.count)")
+            check("子层选中：拖拽也能带走",
+                  model.dragURLs.count == 1, "urls=\(model.dragURLs.count)")
+
+            model.requestTrash()
+            check("子层选中：删除会进入确认而不是静默返回",
+                  model.pendingTrash?.count == 1, "pending=\(model.pendingTrash?.count ?? -1)")
+            model.confirmTrash()
+            check("子层选中：确认后文件真的被删掉", !fm.fileExists(atPath: deepFile.path))
+            check("子层选中：删除后选中集合被清空", model.selection.isEmpty,
+                  "left=\(model.selection.count)")
+            // 删除后子树是异步重读的，等它回来再看可见行
+            waitForChildren(deepInner)
+            check("子层选中：可见行里不再有它",
+                  !model.treeRows.contains { $0.item.name == "doomed.txt" },
+                  "rows=\(model.treeRows.map(\.item.name))")
+        } else {
+            check("选中项同步：子层项也能被选中", false, "没找到 doomed.txt 的可见行")
+        }
+        model.toggleExpanded(deepInner)
+        model.toggleExpanded(deepDir)
+
         // 搜索时退化为扁平：只匹配当前层，不跨层展开
         model.toggleExpanded(treeSub)
         waitForChildren(treeSub)

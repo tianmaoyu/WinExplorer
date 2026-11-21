@@ -109,4 +109,5 @@
 | **树缓存原地重读** | 刷新时不丢子项缓存，后台重读后覆盖；避免展开的子树在重读期间整片消失 | `BrowserModel.ensureChildrenLoaded(_:force:)`（adr/0020） |
 | **items / rows** | 数据侧可见项数 与 界面侧行数；两者对不上就是「看不到文件」的直接证据，已进运行日志采样 | `BrowserModel.diagnosticsSummary` |
 | **展开即重读** | 展开文件夹时强制重读磁盘（而不是复用上次的缓存），保证拖拽移动后能看到新内容 | `BrowserModel.toggleExpanded`（adr/0021） |
+| **可见项** | 与界面行一一对应的文件项数组（树形展开后的完整列表）；操作层查选中项必须用它，不能用 `items` | `BrowserModel.visibleItems`（adr/0022） |
 

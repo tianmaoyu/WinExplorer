@@ -57,6 +57,10 @@ final class BrowserModel: ObservableObject {
     @Published private(set) var loadingTreePaths: Set<String> = []
     /// 扁平化后的可见行：`LazyVStack` 直接渲染这个
     @Published private(set) var treeRows: [TreeRow] = []
+    /// 可见行对应的文件项（按显示顺序）。
+    /// **所有「对选中项做什么」的逻辑都必须走这里**：`items` 只是当前目录的直接
+    /// 子项，树形展开后选中的项常常在子层里，用 `items` 找会得到空数组（adr/0022）。
+    @Published private(set) var visibleItems: [FileItem] = []
     @Published var flash: String?
 
     /// 多选集合
@@ -433,7 +437,7 @@ final class BrowserModel: ObservableObject {
 
     /// 拖动时实际要带的 URL：拖的是选中项就整批带走，按列表顺序
     var dragURLs: [URL] {
-        items.filter { selection.contains($0.url) }.map(\.url)
+        visibleItems.filter { selection.contains($0.url) }.map(\.url)
     }
 
     /// 焦点在文本框里（正在行内重命名）。
@@ -448,7 +452,7 @@ final class BrowserModel: ObservableObject {
     }
 
     var selectedItems: [FileItem] {
-        items.filter { selection.contains($0.url) }
+        visibleItems.filter { selection.contains($0.url) }
     }
 
     var selectedTotalSize: Int64 {
@@ -899,6 +903,7 @@ final class BrowserModel: ObservableObject {
     private func rebuildTreeRows() {
         guard usesTreeLayout else {
             treeRows = items.map { TreeRow(item: $0, depth: 0, isExpanded: false) }
+            visibleItems = items
             return
         }
         var rows: [TreeRow] = []
@@ -908,6 +913,7 @@ final class BrowserModel: ObservableObject {
             RunLog.shared.log(.perf, "⚠️ 树形行为空但 items=\(items.count)（当前目录 \(currentURL.path)）")
         }
         treeRows = rows
+        visibleItems = rows.map(\.item)
         if ProcessInfo.processInfo.environment["WINEXPLORER_TREE_DEBUG"] == "1" {
             let dump = rows.prefix(20).map { "\(String(repeating: "  ", count: $0.depth))\($0.item.name)" }
             print("[Tree] rows=\(rows.count): " + dump.joined(separator: " | "))
@@ -1147,8 +1153,10 @@ final class BrowserModel: ObservableObject {
 
     // MARK: - 选择
 
+    /// 在**可见行**里定位：树形展开后焦点可能落在子层，
+    /// 用 `items` 找会让方向键卡在当前层（adr/0022）
     private func index(of url: URL) -> Int? {
-        items.firstIndex { $0.url == url }
+        visibleItems.firstIndex { $0.url == url }
     }
 
     /// 单击：按修饰键决定单选 / ⌘ 加选 / Shift 连选
@@ -1210,10 +1218,9 @@ final class BrowserModel: ObservableObject {
     func focus(url: URL, scroll: Bool = true) {
         let targetPath = url.standardizedFileURL.path
         // 树形展开后，目标可能在某个子层里，所以先在可见行里找
-        let pool = usesTreeLayout ? treeRows.map(\.item) : items
-        guard let match = pool.first(where: { $0.url.standardizedFileURL.path == targetPath }) else {
-            return
-        }
+        guard let match = visibleItems.first(where: {
+            $0.url.standardizedFileURL.path == targetPath
+        }) else { return }
         selection = [match.url]
         focusedURL = match.url
         anchorURL = match.url
@@ -1222,15 +1229,16 @@ final class BrowserModel: ObservableObject {
 
     /// 键盘 ↑↓ / PgUp / PgDn
     func moveFocus(by delta: Int) {
-        guard !items.isEmpty else { return }
-        let current = focusedURL.flatMap(index(of:)) ?? (delta > 0 ? -1 : items.count)
-        let next = min(max(current + delta, 0), items.count - 1)
-        focus(url: items[next].url)
+        let pool = visibleItems
+        guard !pool.isEmpty else { return }
+        let current = focusedURL.flatMap(index(of:)) ?? (delta > 0 ? -1 : pool.count)
+        let next = min(max(current + delta, 0), pool.count - 1)
+        focus(url: pool[next].url)
     }
 
     /// Home / End
     func focusEdge(first: Bool) {
-        guard let target = first ? items.first : items.last else { return }
+        guard let target = first ? visibleItems.first : visibleItems.last else { return }
         focus(url: target.url)
     }
 
@@ -2430,8 +2438,9 @@ final class BrowserModel: ObservableObject {
     private func applyPendingReveal() {
         guard let target = pendingRevealURL else { return }
         let path = target.path
-        let pool = usesTreeLayout ? treeRows.map(\.item) : items
-        guard let match = pool.first(where: { $0.url.standardizedFileURL.path == path }) else { return }
+        guard let match = visibleItems.first(where: {
+            $0.url.standardizedFileURL.path == path
+        }) else { return }
         pendingRevealURL = nil
         selection = [match.url]
         focusedURL = match.url
