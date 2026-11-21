@@ -101,4 +101,5 @@
 | **选中高亮内缩** | 访达比例：左右各让 5pt、上下各让 1pt、圆角 5pt；高亮层在条纹之上，会盖住分隔线 | `FileListLayout.selection*Inset` |
 | **列宽光标** | 悬停在列分隔线上的自绘光标：中间竖线 + 两侧箭头，白色描边适配深浅背景 | `FileListView.DividerCursor` |
 | **列内留白** | 左对齐列的内容与列边界之间的 8pt 间距；分隔线画在列边界上，不留白文字会压线 | `FileListLayout.columnTextInset` |
+| **光标区域** | 用 `NSView.addCursorRect` 声明「这块区域用这个光标」，AppKit 在每次鼠标移动时自动应用；与 `NSCursor.set()` 的一次性设置相反 | `FileListView.DividerArea`（adr/0018） |
 

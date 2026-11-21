@@ -139,6 +139,16 @@ struct FileListView: View {
                             hotSpot: NSPoint(x: logicalSize.width / 2, y: logicalSize.height / 2))
         }
 
+        /// 列分隔线的「光标 + 悬停」区域。
+        ///
+        /// 为什么不用 SwiftUI 的 `.onHover` + `NSCursor.set()`：
+        /// 1. `set()` 只在当下把光标改一次，AppKit 会在**下一次鼠标移动**时
+        ///    依据视图的 cursor rect 重新决定光标 —— 表现出来就是「闪一下就变回箭头」；
+        /// 2. SwiftUI 每次重绘都会重建视图，`onHover` 不保证补发，悬停态会丢。
+        ///
+        /// 改由 AppKit 自己管：
+        /// - `resetCursorRects()` 注册 cursor rect，鼠标每次移动都由系统自动应用；
+        /// - `NSTrackingArea` 驱动悬停高亮，视图重建时重新注册，状态不丢。
         /// 形状：1.5pt 竖线（高 16）+ 左右各一个 4pt 长的实心箭头。
         /// 先描 3pt 白边再填黑，深浅背景下都看得清（系统光标也是这个做法）。
         private static func draw() {
@@ -173,6 +183,60 @@ struct FileListView: View {
             path.fill()
         }
     }
+
+        struct DividerArea: NSViewRepresentable {
+            let cursor: NSCursor
+            let onHover: (Bool) -> Void
+
+            func makeNSView(context: Context) -> AreaView {
+                let view = AreaView()
+                view.cursor = cursor
+                view.onHover = onHover
+                return view
+            }
+
+            func updateNSView(_ view: AreaView, context: Context) {
+                view.cursor = cursor
+                view.onHover = onHover
+                // 光标可能被换过（拖动结束、外观切换），重算一次 cursor rect
+                view.window?.invalidateCursorRects(for: view)
+            }
+
+            final class AreaView: NSView {
+                var cursor: NSCursor = .arrow
+                var onHover: ((Bool) -> Void)?
+                private var tracking: NSTrackingArea?
+
+                /// 不参与命中测试：点击、拖拽、双击仍然交给上面那层 SwiftUI 手势
+                override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+                override func resetCursorRects() {
+                    addCursorRect(bounds, cursor: cursor)
+                }
+
+                override func updateTrackingAreas() {
+                    super.updateTrackingAreas()
+                    if let tracking { removeTrackingArea(tracking) }
+                    let area = NSTrackingArea(
+                        rect: bounds,
+                        options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                        owner: self
+                    )
+                    addTrackingArea(area)
+                    tracking = area
+                }
+
+                override func mouseEntered(with event: NSEvent) {
+                    onHover?(true)
+                    // cursor rect 要等下一次移动才应用，进入瞬间先手动补一下
+                    cursor.set()
+                }
+
+                override func mouseExited(with event: NSEvent) {
+                    onHover?(false)
+                }
+            }
+        }
 
     var body: some View {
         GeometryReader { geometry in
@@ -327,6 +391,11 @@ struct FileListView: View {
 
     private func dividerHandle(_ column: ResizableColumn) -> some View {
         ZStack {
+            // 光标与悬停态交给 AppKit：cursor rect 才能在鼠标每次移动时持续生效
+            DividerArea(cursor: Self.dividerCursor) { inside in
+                hoveredDivider = inside ? column : (hoveredDivider == column ? nil : hoveredDivider)
+            }
+
             // 透明拖拽热区（比可见线宽，好抓）
             Rectangle()
                 .fill(Color.clear)
@@ -342,16 +411,6 @@ struct FileListView: View {
         }
         .frame(width: FileListLayout.dividerHitWidth, height: FileListLayout.rowHeight)
         .contentShape(Rectangle())
-        .onHover { inside in
-            hoveredDivider = inside ? column : (hoveredDivider == column ? nil : hoveredDivider)
-            // 用 set 而不是 push/pop：视图被重建时 push 容易和 pop 失配，鼠标指针会卡住
-            if inside {
-                // columnResize：中间竖线 + 两侧箭头，macOS 给「调列宽」的专用光标
-                Self.dividerCursor.set()
-            } else {
-                NSCursor.arrow.set()
-            }
-        }
             .gesture(
                 DragGesture(minimumDistance: 1)
                     .onChanged { value in
