@@ -71,6 +71,24 @@ WinExplorer 是一个原生 macOS 应用：在该像资源管理器的地方像�
 
 ![tree](docs/screenshots/tree.png)
 
+## 下载安装
+
+不想自己编译的话，直接下最新版：[Releases](https://github.com/tianmaoyu/WinExplorer/releases/latest)
+
+| 文件 | 说明 |
+|---|---|
+| `WinExplorer-1.5.4.dmg` | 打开后把 WinExplorer 拖进「应用程序」 |
+| `WinExplorer-1.5.4.pkg` | 双击安装 |
+
+包是 ad-hoc 签名、**未经公证**，首次打开会被 Gatekeeper 拦下。右键点 WinExplorer →
+「打开」→ 再点「打开」，或者执行一次：
+
+```bash
+xattr -dr com.apple.quarantine /Applications/WinExplorer.app
+```
+
+想从源码构建见下一节。
+
 ## 环境要求
 
 - macOS 14 (Sonoma) 或更高

@@ -81,6 +81,24 @@ shows the full path of the selection:
 
 ![tree](docs/screenshots/tree.png)
 
+## Install
+
+Prebuilt binaries are on the [Releases page](https://github.com/tianmaoyu/WinExplorer/releases/latest):
+
+| File | What to do |
+|---|---|
+| `WinExplorer-1.5.4.dmg` | Open it and drag WinExplorer into Applications |
+| `WinExplorer-1.5.4.pkg` | Double-click to install |
+
+The bundles are ad-hoc signed and **not notarized**, so Gatekeeper blocks the first
+launch. Right-click WinExplorer → Open → Open again, or run once:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/WinExplorer.app
+```
+
+Prefer building from source? See the next section.
+
 ## Requirements
 
 - macOS 14 (Sonoma) or later
