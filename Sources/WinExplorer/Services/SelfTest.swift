@@ -1084,6 +1084,17 @@ enum SelfTest {
         check("网络卷都在「网络」里", Place.networkVolumes.allSatisfy { !$0.isLocal })
         check("全局快捷键文案", GlobalHotKey.shortcutText == "⌥⌘E")
 
+        // 真的向系统注册一次热键，验证 Carbon 这条路是通的（注册完立刻注销）
+        let hotKey = GlobalHotKey.shared
+        check("系统热键可以注册", hotKey.register())
+        hotKey.unregister()
+        check("系统热键可以注销", !hotKey.isRegistered)
+
+        StatusItemController.shared.setVisible(true)
+        check("菜单栏图标能装上", StatusItemController.shared.isVisible)
+        StatusItemController.shared.setVisible(false)
+        check("菜单栏图标能移除", !StatusItemController.shared.isVisible)
+
         model.showAbout()
         check("关于面板打开", model.showsAbout && model.hasModalOverlay)
         model.closeAbout()
