@@ -67,10 +67,20 @@ struct InfoPanelView: View {
 
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(nsImage: IconProvider.shared.icon(for: state.iconURL))
-                .resizable()
-                .interpolation(.high)
-                .frame(width: 52, height: 52)
+            // 媒体资料库项不去问系统要图标（会引出授权框），其余保持系统真实图标
+            if ProtectedPaths.shouldAvoidSystemIcon(state.iconURL) {
+                Image(systemName: "folder.fill")
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundStyle(Color.accentColor.opacity(0.85))
+                    .frame(width: 46, height: 46)
+                    .frame(width: 52, height: 52)
+            } else {
+                Image(nsImage: IconProvider.shared.icon(for: state.iconURL))
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 52, height: 52)
+            }
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(state.title)

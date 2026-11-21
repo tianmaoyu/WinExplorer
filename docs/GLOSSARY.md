@@ -35,3 +35,13 @@
 | **授权浮层** | 窗口内的 `AccessRequestView`，只在主动操作未授权项 / 进入被拒目录时出现 | `BrowserModel.accessRequest` |
 | **授权入口** | 浮层里的「选择此项目以授权…」（`NSOpenPanel` 预选该项）与「打开系统设置」（TCC） | `PermissionService.pickInPanel` |
 | **拦截点** | 所有写操作/打开动作的统一闸门，有未授权目标就弹浮层并中止 | `blockedByUnauthorized` |
+
+## 受保护位置（v1.2.1）
+
+| 词 | 含义 | 对应代码 |
+|---|---|---|
+| **受保护位置** | macOS 做 TCC 隐私保护的位置：桌面 / 文稿 / 下载 / 音乐 / 影片 / 图片 / 资源库（含 iCloud 云盘）、外置卷、其他用户目录、媒体与照片资料库包 | `ProtectedPaths` |
+| **后台递归** | 应用自己发起的、用户没主动点开的深度读取：文件夹大小统计、属性面板「显示简介」的统计 | `FolderSizeService.measure`、`FileInfoService.folderStats` |
+| **跳过统计** | 对受保护位置不启动枚举，返回 `skipped`；大小显示 `—`（不是 `0 B`），结果不进缓存 | `Size.skipped` / `FolderStats.skipped` |
+| **主动浏览** | 用户双击进入目录、正常列出这一层。**不受保护规则限制**，仍可复制 / 重命名 / 删除 | `BrowserModel.load` |
+| **图标规避** | 比「跳过统计」更窄：只对媒体资料库包与 `~/音乐/Music` 内部项避开 `NSWorkspace.icon(forFile:)`；可读的受保护目录保持系统真实图标 | `ProtectedPaths.shouldAvoidSystemIcon` |

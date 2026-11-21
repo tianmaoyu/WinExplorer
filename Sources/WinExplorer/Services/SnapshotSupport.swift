@@ -15,6 +15,12 @@ enum SnapshotSupport {
         guard env["WINEXPLORER_SNAPSHOT"] != nil else { return }
         guard !hasScheduled else { return }
         hasScheduled = true
+
+        // 截图验收会用 sizes:on / cmd+3 之类的钩子改视图偏好，绝不能写进用户真实的
+        // UserDefaults —— 否则一次截图就把「计算文件夹大小」永久打开，重启后
+        // 后台递归扫 ~/音乐/Music，引来反复的系统授权弹框。
+        Preferences.enabled = false
+
         let path = env["WINEXPLORER_SNAPSHOT"]!
 
         let keys = (env["WINEXPLORER_KEYS"] ?? "")
@@ -127,6 +133,15 @@ enum SnapshotSupport {
                     if key.hasPrefix("drop:") {
                         // 手动点亮某个落点，用于截图确认拖拽高亮
                         active.dropTargetURL = URL(fileURLWithPath: String(key.dropFirst("drop:".count)))
+                        return
+                    }
+                    if key.hasPrefix("info:") {
+                        // 选中并打开属性面板：用于截图验收受保护目录的「跳过统计」说明
+                        let name = String(key.dropFirst("info:".count))
+                        if let item = active.items.first(where: { $0.name == name }) {
+                            active.selectOnly(item)
+                            active.showInfo()
+                        }
                         return
                     }
                     if key.hasPrefix("open:") {

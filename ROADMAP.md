@@ -1,6 +1,6 @@
 # ROADMAP — 对齐 Windows 资源管理器的操作能力
 
-当前基线：**v1.2.0** —— 26 项 + 后加的权限展示（见 `docs/adr/0002`）全部完成。
+当前基线：**v1.2.1** —— 26 项 + 权限展示（ADR 0002）+ 受保护位置跳过后台递归（ADR 0003）全部完成。
 本文件是唯一的待办清单，做完一项勾一项，并在 README 里同步"已实现"。后续想法写在末尾「1.0 之后」。
 
 ## 优先级总览
@@ -34,6 +34,7 @@
 | 25 | ✅ 打包分发 | .pkg / DMG、App 图标、关于窗口 | P3 | — |
 | 26 | ✅ 本地化 | 中 / 英双语（跟随系统语言） | P3 | — |
 | 27 | ✅ 权限展示与授权 | 未授权项淡显 + 锁、只在主动操作时提示单项授权 | P1 | — |
+| 28 | ✅ 受保护位置 | 后台递归统计跳过 TCC 位置，杜绝反复弹系统授权框 | P0 | — |
 
 ---
 
@@ -88,6 +89,7 @@
 - **压缩 / 解压**：单个项目用 `ditto --keepParent`（保留权限与扩展属性），多个项目用 `zip -r`（ditto 不支持多源）；解压先落到同目录的临时文件夹，再按最终结构搬迁 —— 既能消掉多余的嵌套层，又能在「解压到当前文件夹」时用真实文件名判断冲突，绝不静默覆盖。
 - **文件夹大小**：`FolderSizeService` 串行队列 + 「路径 + 目录 mtime」缓存；`FolderSizeJob` 作为跨线程取消标记，换目录/关开关立刻停；单目录 2 万文件截断并标 `≥`。
 - **全局唤起**：Carbon `RegisterEventHotKey`（免辅助功能权限）；菜单栏用 `NSStatusItem`；关窗不退出靠 `applicationShouldTerminateAfterLastWindowClosed` 读偏好，`WindowOpener` 通过 SwiftUI `openWindow` 重建窗口。
+- **受保护位置**：`ProtectedPaths` 单一规则，`FolderSizeService` / `FileInfoService.folderStats` 共用；用户主动浏览不受影响，跳过项大小显示 `—`，状态栏与属性面板给原因。截图模式禁写偏好，见 `docs/adr/0003`。
 - **本地化**：`L(中文, English)` 双参函数，`L10n.isEnglish` 跟随系统首选语言、可用 `WINEXPLORER_LANG` 强制。文件「类型」列由系统 UTType 提供，跟随进程语言。
 
 ## 迭代计划（每轮一个可运行版本 + 自检 + 截图）

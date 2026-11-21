@@ -30,6 +30,12 @@ final class FolderSizeService {
         var fileCount: Int
         /// 命中上限提前结束，界面上加「≥」提示
         var truncated: Bool
+        /// 位置受 macOS 隐私保护：没去枚举，界面上显示「—」而不是 0 B
+        var skipped: Bool = false
+
+        static var skippedSize: Size {
+            Size(bytes: 0, fileCount: 0, truncated: false, skipped: true)
+        }
     }
 
     /// 单个目录最多统计这么多文件
@@ -54,6 +60,8 @@ final class FolderSizeService {
     }
 
     func store(_ size: Size, for url: URL) {
+        // 跳过结果不缓存：规则或系统授权状态变了，下次应该重新判
+        guard !size.skipped else { return }
         let standardized = url.standardizedFileURL
         guard let modified = Self.modificationDate(of: standardized) else { return }
         cache[standardized.path] = (modified, size)
@@ -85,7 +93,15 @@ final class FolderSizeService {
     }
 
     /// 递归统计（符号链接不跟随；包内部也统计，和 Finder 口径一致）
+    ///
+    /// 受 macOS 隐私保护的位置**不启动枚举**：`~/音乐/Music` 这类媒体资料库
+    /// 只要被递归扫到就会弹系统授权框，而且每次刷新都问一遍。
+    /// 用户主动双击进去正常浏览，但「后台自动深入读内容」不做。
     static func measure(_ url: URL) -> Size {
+        guard !ProtectedPaths.shouldSkipRecursiveRead(url) else {
+            return .skippedSize
+        }
+
         let keys: [URLResourceKey] = [
             .isDirectoryKey,
             .fileSizeKey,

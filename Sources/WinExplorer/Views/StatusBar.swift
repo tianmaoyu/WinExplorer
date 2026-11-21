@@ -8,6 +8,14 @@ struct StatusBar: View {
         model.items.filter { $0.access.isDenied }.count
     }
 
+    /// 有多少文件夹受 macOS 隐私保护、被跳过了自动统计（解释大小列里的「—」）
+    private var protectedCount: Int {
+        guard model.showsFolderSizes else { return 0 }
+        return model.items.filter {
+            $0.isDirectory && $0.isAccessible && ProtectedPaths.shouldSkipRecursiveRead($0.url)
+        }.count
+    }
+
     var body: some View {
         HStack(spacing: 6) {
             if let flash = model.flash {
@@ -25,6 +33,19 @@ struct StatusBar: View {
                 Text(L("\(unauthorizedCount) 项未授权", "\(unauthorizedCount) not authorized"))
                     .font(.system(size: 10.5))
                     .foregroundStyle(.orange)
+            }
+
+            if protectedCount > 0 {
+                Text("·")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                Text(L("\(protectedCount) 项受保护，跳过统计", "\(protectedCount) protected, not scanned"))
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.secondary)
+                    .help(L(
+                        "这些位置受 macOS 隐私保护，自动递归统计会弹系统授权框，所以大小显示「—」；你仍可以正常打开浏览。",
+                        "These locations are protected by macOS. Scanning them would trigger a system permission dialog, so their size is shown as “—”. You can still open them normally."
+                    ))
             }
 
             if let progress = model.folderSizeProgress {

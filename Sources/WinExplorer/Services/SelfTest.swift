@@ -1187,6 +1187,66 @@ enum SelfTest {
         check("普通临时目录不需要系统设置",
               !PermissionService.needsSystemSettings(permRoot))
 
+        // MARK: 受保护位置（后台递归绝不进 TCC 区域，避免反复弹系统授权框）
+        let homeURL = URL(fileURLWithPath: NSHomeDirectory())
+        let homeProtectedNames = [
+            "Desktop", "Documents", "Downloads",
+            "Music", "Movies", "Pictures", "Library"
+        ]
+        for name in homeProtectedNames {
+            let target = homeURL.appendingPathComponent(name)
+            check("受保护的家目录位置：\(name)",
+                  ProtectedPaths.shouldSkipRecursiveRead(target))
+        }
+        check("Apple Music 媒体资料库被识别",
+              ProtectedPaths.shouldSkipRecursiveRead(homeURL.appendingPathComponent("Music/Music")))
+        check("照片图库包被识别",
+              ProtectedPaths.shouldSkipRecursiveRead(root.appendingPathComponent("图库.photoslibrary")))
+        check("外置卷被识别",
+              ProtectedPaths.shouldSkipRecursiveRead(URL(fileURLWithPath: "/Volumes/移动硬盘")))
+        check("其他用户目录被识别",
+              ProtectedPaths.shouldSkipRecursiveRead(URL(fileURLWithPath: "/Users/someone-else/Documents")))
+        check("家目录本身只列一层，不拦浏览",
+              !ProtectedPaths.shouldSkipRecursiveRead(homeURL))
+        check("临时目录不被误判为受保护",
+              !ProtectedPaths.shouldSkipRecursiveRead(root)
+                  && !ProtectedPaths.shouldSkipRecursiveRead(permRoot))
+        check("普通子目录不被误判为受保护",
+              !ProtectedPaths.shouldSkipRecursiveRead(openDir))
+
+        // 图标规则比统计规则窄：可读的受保护目录必须保持系统真实图标
+        check("媒体资料库子目录避开系统图标",
+              ProtectedPaths.shouldAvoidSystemIcon(homeURL.appendingPathComponent("Music/Music")))
+        check("照片图库包避开系统图标",
+              ProtectedPaths.shouldAvoidSystemIcon(root.appendingPathComponent("图库.photoslibrary")))
+        check("桌面仍用系统图标（可读就不该画灰）",
+              !ProtectedPaths.shouldAvoidSystemIcon(homeURL.appendingPathComponent("Desktop")))
+        check("音乐目录本身仍用系统图标",
+              !ProtectedPaths.shouldAvoidSystemIcon(homeURL.appendingPathComponent("Music")))
+        check("普通目录仍用系统图标",
+              !ProtectedPaths.shouldAvoidSystemIcon(openDir))
+
+        // 用不存在的受保护路径，避免断言写错时真的去枚举 ~/Music 弹系统框
+        let fakeMusic = homeURL.appendingPathComponent("Music/__winexplorer_selftest_absent__")
+        let skippedSize = FolderSizeService.measure(fakeMusic)
+        check("文件夹大小统计对受保护位置直接跳过", skippedSize.skipped)
+        check("跳过的统计不会被显示成 0 B", skippedSize.bytes == 0 && skippedSize.fileCount == 0)
+        check("跳过结果不进缓存",
+              FolderSizeService.shared.cached(fakeMusic) == nil)
+        let skippedStats = FileInfoService.folderStats(fakeMusic)
+        check("属性面板统计对受保护位置直接跳过", skippedStats.skipped && skippedStats.isEmpty)
+
+        let normalSize = FolderSizeService.measure(openDir)
+        check("普通目录照常统计（未被规则误伤）",
+              !normalSize.skipped && normalSize.fileCount == 1 && normalSize.bytes > 0,
+              "实际 \(normalSize)")
+        check("桌面仍被认作需要系统设置的位置",
+              PermissionService.needsSystemSettings(homeURL.appendingPathComponent("Desktop")))
+        check("跳过说明文案跟随语言",
+              !ProtectedPaths.skipReason.isEmpty
+                  && ProtectedPaths.skipReason == L("受 macOS 隐私保护，跳过自动统计",
+                                                    "Protected by macOS — automatic scanning skipped"))
+
         check("本地化按当前语言取文案", L("甲", "A") == (L10n.isEnglish ? "A" : "甲"))
 
         let before = model.currentURL

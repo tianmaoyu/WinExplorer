@@ -654,9 +654,16 @@ struct FileRow: View {
 
     /// 悬停提示：未授权项直接说清楚"打开时会提示授权"，避免用户以为是坏了
     private var helpText: String {
-        item.isAccessible
-            ? item.name
-            : L("未授权：「\(item.name)」需要授权后才能打开", "Not authorized: “\(item.name)” needs permission to open")
+        if !item.isAccessible {
+            return L("未授权：「\(item.name)」需要授权后才能打开", "Not authorized: “\(item.name)” needs permission to open")
+        }
+        if ProtectedPaths.shouldSkipRecursiveRead(item.url) {
+            return L(
+                "「\(item.name)」受 macOS 隐私保护，不自动统计大小；仍可正常打开",
+                "“\(item.name)” is protected by macOS — size isn't scanned, but you can still open it"
+            )
+        }
+        return item.name
     }
 
     /// 未授权项整体变淡；剪切中的项也变淡，两者取更淡的那个
@@ -738,9 +745,16 @@ struct CompactRow: View {
 
     /// 悬停提示：未授权项直接说清楚"打开时会提示授权"，避免用户以为是坏了
     private var helpText: String {
-        item.isAccessible
-            ? item.name
-            : L("未授权：「\(item.name)」需要授权后才能打开", "Not authorized: “\(item.name)” needs permission to open")
+        if !item.isAccessible {
+            return L("未授权：「\(item.name)」需要授权后才能打开", "Not authorized: “\(item.name)” needs permission to open")
+        }
+        if ProtectedPaths.shouldSkipRecursiveRead(item.url) {
+            return L(
+                "「\(item.name)」受 macOS 隐私保护，不自动统计大小；仍可正常打开",
+                "“\(item.name)” is protected by macOS — size isn't scanned, but you can still open it"
+            )
+        }
+        return item.name
     }
 
     /// 未授权项整体变淡；剪切中的项也变淡，两者取更淡的那个
@@ -808,9 +822,16 @@ struct IconCell: View {
 
     /// 悬停提示：未授权项直接说清楚"打开时会提示授权"，避免用户以为是坏了
     private var helpText: String {
-        item.isAccessible
-            ? item.name
-            : L("未授权：「\(item.name)」需要授权后才能打开", "Not authorized: “\(item.name)” needs permission to open")
+        if !item.isAccessible {
+            return L("未授权：「\(item.name)」需要授权后才能打开", "Not authorized: “\(item.name)” needs permission to open")
+        }
+        if ProtectedPaths.shouldSkipRecursiveRead(item.url) {
+            return L(
+                "「\(item.name)」受 macOS 隐私保护，不自动统计大小；仍可正常打开",
+                "“\(item.name)” is protected by macOS — size isn't scanned, but you can still open it"
+            )
+        }
+        return item.name
     }
 
     /// 未授权项整体变淡；剪切中的项也变淡，两者取更淡的那个

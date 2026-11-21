@@ -377,6 +377,8 @@ final class BrowserModel: ObservableObject {
         guard item.isDirectory else { return item.sizeText }
         guard showsFolderSizes else { return "—" }
         guard let size = folderSizes[item.url.standardizedFileURL.path] else { return "…" }
+        // 受保护位置没去枚举，别把 0 显示成「空文件夹」
+        guard !size.skipped else { return "—" }
         let text = FileItem.byteText(size.bytes)
         return size.truncated ? "≥ " + text : text
     }
@@ -1122,11 +1124,22 @@ final class BrowserModel: ObservableObject {
             var bytes = infoTargets
                 .filter { !$0.isDirectory }
                 .reduce(Int64(0)) { $0 + ($1.size ?? 0) }
+            var skipped = false
             for item in infoTargets where item.isDirectory {
-                bytes += stats[item.url.standardizedFileURL.path]?.bytes ?? 0
+                let entry = stats[item.url.standardizedFileURL.path]
+                if entry?.skipped == true {
+                    skipped = true
+                } else {
+                    bytes += entry?.bytes ?? 0
+                }
             }
-            state.set("size", to: FileInfoService.byteText(bytes))
-            state.note = nil
+            state.set("size", to: (skipped ? "≥ " : "") + FileInfoService.byteText(bytes))
+            state.note = skipped
+                ? L(
+                    "有文件夹受 macOS 隐私保护，未计入大小",
+                    "Some folders are protected by macOS and were not counted"
+                )
+                : nil
         }
         info = state
     }

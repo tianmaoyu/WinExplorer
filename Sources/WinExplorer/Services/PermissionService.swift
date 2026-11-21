@@ -31,17 +31,10 @@ enum PermissionService {
         return false
     }
 
-    /// 属于 TCC 保护的位置：这类拒绝没法靠「重新选一次」解决，得去系统设置
+    /// 属于 TCC 保护的位置：这类拒绝没法靠「重新选一次」解决，得去系统设置。
+    /// 规则和后台递归跳过共用一份，免得两处判定漂移。
     static func needsSystemSettings(_ url: URL) -> Bool {
-        let path = url.standardizedFileURL.path
-        let home = NSHomeDirectory()
-        let protected = ["Desktop", "Documents", "Downloads"]
-        for name in protected {
-            let prefix = home + "/" + name
-            if path == prefix || path.hasPrefix(prefix + "/") { return true }
-        }
-        if path == "/Volumes" || path.hasPrefix("/Volumes/") { return true }
-        return false
+        ProtectedPaths.shouldSkipRecursiveRead(url)
     }
 
     // MARK: - 授权入口
