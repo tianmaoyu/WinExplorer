@@ -4,14 +4,16 @@ import UniformTypeIdentifiers
 
 /// 表头与数据行共用同一套列骨架，保证任何屏幕上都不会错列。
 enum FileListLayout {
-    static let sizeWidth: CGFloat = 90
-    static let dateWidth: CGFloat = 150
-    static let kindWidth: CGFloat = 120
     static let rowHeight: CGFloat = 26
+    static let compactRowHeight: CGFloat = 22
     static let horizontalPadding: CGFloat = 10
+    static let sizeTrailingPadding: CGFloat = 16
+    static let dateTrailingPadding: CGFloat = 4
+    static let dividerHitWidth: CGFloat = 7
 
     @ViewBuilder
     static func row<Name: View, Size: View, Date: View, Kind: View>(
+        widths: ColumnWidths,
         @ViewBuilder name: () -> Name,
         @ViewBuilder size: () -> Size,
         @ViewBuilder date: () -> Date,
@@ -21,23 +23,39 @@ enum FileListLayout {
             name()
                 .frame(maxWidth: .infinity, alignment: .leading)
             size()
-                .frame(width: sizeWidth, alignment: .trailing)
-                .padding(.trailing, 16)
+                .frame(width: widths.size, alignment: .trailing)
+                .padding(.trailing, sizeTrailingPadding)
             date()
-                .frame(width: dateWidth, alignment: .leading)
-                .padding(.trailing, 4)
+                .frame(width: widths.date, alignment: .leading)
+                .padding(.trailing, dateTrailingPadding)
             kind()
-                .frame(width: kindWidth, alignment: .leading)
+                .frame(width: widths.kind, alignment: .leading)
         }
         .padding(.horizontal, horizontalPadding)
     }
+
+    /// 列边界距表头左缘的 x（从右往左推算，保证和 row 的骨架完全一致）
+    static func dividerX(_ column: ResizableColumn, widths: ColumnWidths, totalWidth: CGFloat) -> CGFloat {
+        let kindLeft = totalWidth - horizontalPadding - widths.kind
+        switch column {
+        case .kind:
+            return kindLeft
+        case .date:
+            return kindLeft - dateTrailingPadding - widths.date
+        case .size:
+            return kindLeft - dateTrailingPadding - widths.date - sizeTrailingPadding - widths.size
+        }
+    }
 }
 
-/// Windows 资源管理器式的"详细信息"列表：表头可排序，行可多选、可双击打开。
+/// 三种视图共用的列表容器：详细信息 / 列表 / 图标。
 struct FileListView: View {
     @ObservedObject var model: BrowserModel
     /// 拖到列表空白处 = 拖进当前文件夹
     @State private var emptyAreaTargeted = false
+    /// 列宽拖拽的起始宽度（一次只拖一条边界）
+    @State private var resizeStart: CGFloat?
+    @State private var resizingColumn: ResizableColumn?
 
     var body: some View {
         GeometryReader { geometry in
@@ -64,21 +82,13 @@ struct FileListView: View {
                                 return true
                             }
 
-                        LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                            Section {
-                                VStack(spacing: 0) {
-                                    ForEach(model.items) { item in
-                                        row(for: item)
-                                            .id(item.url)
-                                    }
-                                }
-                                .padding(.vertical, 4)
-                            } header: {
-                                VStack(spacing: 0) {
-                                    header
-                                    Divider()
-                                }
-                            }
+                        switch model.viewMode {
+                        case .details:
+                            detailsContent(width: geometry.size.width)
+                        case .list:
+                            listContent
+                        case .icons:
+                            iconsContent(width: geometry.size.width)
                         }
                     }
                     .frame(minHeight: geometry.size.height, alignment: .top)
@@ -106,17 +116,54 @@ struct FileListView: View {
         .background(Color(nsColor: .textBackgroundColor))
     }
 
-    // MARK: - 表头
+    // MARK: - 详细信息
+
+    private func detailsContent(width: CGFloat) -> some View {
+        LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+            Section {
+                VStack(spacing: 0) {
+                    ForEach(model.items) { item in
+                        row(for: item)
+                            .id(item.url)
+                    }
+                }
+                .padding(.vertical, 4)
+            } header: {
+                VStack(spacing: 0) {
+                    header
+                    Divider()
+                }
+            }
+        }
+    }
 
     private var header: some View {
-        FileListLayout.row {
-            headerButton("名称", column: .name, alignment: .leading)
-        } size: {
-            headerButton("大小", column: .size, alignment: .trailing)
-        } date: {
-            headerButton("修改日期", column: .modified, alignment: .leading)
-        } kind: {
-            headerButton("类型", column: .kind, alignment: .leading)
+        GeometryReader { geometry in
+            ZStack(alignment: .topLeading) {
+                FileListLayout.row(widths: model.columnWidths) {
+                    headerButton("名称", column: .name, alignment: .leading)
+                } size: {
+                    headerButton("大小", column: .size, alignment: .trailing)
+                } date: {
+                    headerButton("修改日期", column: .modified, alignment: .leading)
+                } kind: {
+                    headerButton("类型", column: .kind, alignment: .leading)
+                }
+                .frame(height: FileListLayout.rowHeight)
+                .background(Color(nsColor: .controlBackgroundColor))
+
+                // 列边界：拖拽改宽度，双击按内容自适应
+                ForEach(ResizableColumn.allCases, id: \.self) { column in
+                    dividerHandle(column)
+                        .offset(
+                            x: FileListLayout.dividerX(
+                                column,
+                                widths: model.columnWidths,
+                                totalWidth: geometry.size.width
+                            ) - FileListLayout.dividerHitWidth / 2
+                        )
+                }
+            }
         }
         .frame(height: FileListLayout.rowHeight)
         .background(Color(nsColor: .controlBackgroundColor))
@@ -142,34 +189,141 @@ struct FileListView: View {
         .help("按\(title)排序")
     }
 
-    // MARK: - 行
+    private func dividerHandle(_ column: ResizableColumn) -> some View {
+        Rectangle()
+            .fill(Color.clear)
+            .frame(width: FileListLayout.dividerHitWidth, height: FileListLayout.rowHeight)
+            .contentShape(Rectangle())
+            .onHover { inside in
+                // 用 set 而不是 push/pop：视图被重建时 push 容易和 pop 失配，鼠标指针会卡住
+                if inside {
+                    NSCursor.resizeLeftRight.set()
+                } else {
+                    NSCursor.arrow.set()
+                }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { value in
+                        if resizingColumn != column {
+                            resizingColumn = column
+                            resizeStart = model.width(for: column)
+                        }
+                        let start = resizeStart ?? model.width(for: column)
+                        model.resizeColumn(column, to: start - value.translation.width)
+                    }
+                    .onEnded { _ in
+                        resizingColumn = nil
+                        resizeStart = nil
+                    }
+            )
+            .onTapGesture(count: 2) {
+                model.autoFitColumn(column)
+            }
+    }
 
-    @ViewBuilder
+    // MARK: - 列表（紧凑单列）
+
+    private var listContent: some View {
+        LazyVStack(spacing: 0) {
+            ForEach(model.items) { item in
+                compactRow(for: item)
+                    .id(item.url)
+            }
+        }
+        .padding(.vertical, 4)
+        .padding(.top, 2)
+    }
+
+    // MARK: - 图标
+
+    private func iconsContent(width: CGFloat) -> some View {
+        let spacing: CGFloat = 8
+        let itemWidth: CGFloat = 104
+        let available = max(width - FileListLayout.horizontalPadding * 2, itemWidth)
+        let columns = max(1, Int((available + spacing) / (itemWidth + spacing)))
+        let gridWidth = CGFloat(columns) * itemWidth + CGFloat(columns - 1) * spacing
+
+        return HStack(spacing: 0) {
+            Spacer(minLength: 0)
+
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.fixed(itemWidth), spacing: spacing), count: columns),
+                spacing: 10
+            ) {
+                ForEach(model.items) { item in
+                    iconCell(for: item)
+                        .id(item.url)
+                }
+            }
+            .frame(width: gridWidth)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, FileListLayout.horizontalPadding)
+        .padding(.vertical, 12)
+        .onAppear { model.gridColumnCount = columns }
+        .onChange(of: columns) { _, newValue in model.gridColumnCount = newValue }
+    }
+
+    // MARK: - 行（三种模式共用交互）
+
     private func row(for item: FileItem) -> some View {
         let renaming = model.renamingURL == item.url
+        return interactive(item: item, renaming: renaming) {
+            FileRow(
+                model: model,
+                item: item,
+                isSelected: model.selection.contains(item.url) && !renaming,
+                isRenaming: renaming,
+                isCut: model.cutURLs.contains(item.url),
+                isDropTarget: model.isDropTarget(item.url),
+                widths: model.columnWidths
+            )
+            .frame(height: FileListLayout.rowHeight)
+        }
+    }
 
-        let base = FileRow(
-            item: item,
-            isSelected: model.selection.contains(item.url) && !renaming,
-            isRenaming: renaming,
-            isCut: model.cutURLs.contains(item.url),
-            isDropTarget: model.isDropTarget(item.url),
-            onCommitRename: { newName in
-                let ok = model.commitRename(newName)
-                if ok {
-                    DispatchQueue.main.async { FocusKeeper.shared.reclaim() }
-                }
-                return ok
-            },
-            onCancelRename: {
-                model.cancelRename()
-                DispatchQueue.main.async { FocusKeeper.shared.reclaim() }
-            }
-        )
-        .frame(height: FileListLayout.rowHeight)
-        .contentShape(Rectangle())
-        // 拖拽发起用的命中探针（不参与点击）
-        .background(RowProbe(url: item.url))
+    private func compactRow(for item: FileItem) -> some View {
+        let renaming = model.renamingURL == item.url
+        return interactive(item: item, renaming: renaming) {
+            CompactRow(
+                model: model,
+                item: item,
+                isSelected: model.selection.contains(item.url) && !renaming,
+                isRenaming: renaming,
+                isCut: model.cutURLs.contains(item.url),
+                isDropTarget: model.isDropTarget(item.url)
+            )
+            .frame(height: FileListLayout.compactRowHeight)
+        }
+    }
+
+    private func iconCell(for item: FileItem) -> some View {
+        let renaming = model.renamingURL == item.url
+        return interactive(item: item, renaming: renaming) {
+            IconCell(
+                model: model,
+                item: item,
+                isSelected: model.selection.contains(item.url) && !renaming,
+                isRenaming: renaming,
+                isCut: model.cutURLs.contains(item.url),
+                isDropTarget: model.isDropTarget(item.url)
+            )
+        }
+    }
+
+    /// 点击 / 双击 / 右键 / 拖放 / 拖拽探针，三种模式行为一致
+    @ViewBuilder
+    private func interactive<Content: View>(
+        item: FileItem,
+        renaming: Bool,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let base = content()
+            .contentShape(Rectangle())
+            // 拖拽发起用的命中探针（不参与点击）
+            .background(RowProbe(url: item.url))
 
         if renaming {
             base
@@ -268,6 +422,18 @@ struct FileListView: View {
             model.reload()
         }
         Divider()
+        ForEach(ViewMode.allCases) { mode in
+            Button {
+                model.viewMode = mode
+            } label: {
+                if model.viewMode == mode {
+                    Label(mode.title, systemImage: "checkmark")
+                } else {
+                    Text(mode.title)
+                }
+            }
+        }
+        Divider()
         Button("在 Finder 中显示") {
             model.revealCurrentDirectory()
         }
@@ -293,7 +459,9 @@ struct FileListView: View {
     }
 }
 
-/// 只有文件夹行接受拖放；拖到文件行上不做任何事。
+// MARK: - 落点
+
+/// 只有文件夹接受拖放；拖到文件上不做任何事。
 private struct FolderDropModifier: ViewModifier {
     @ObservedObject var model: BrowserModel
     let item: FileItem
@@ -327,20 +495,57 @@ private struct FolderDropModifier: ViewModifier {
     }
 }
 
-/// 单行。列宽/内边距全部来自 FileListLayout，和表头严格对齐。
+// MARK: - 重命名输入框（三种模式共用）
+
+private struct RenameInlineView: View {
+    @ObservedObject var model: BrowserModel
+    let item: FileItem
+    var fontSize: CGFloat = 13
+
+    var body: some View {
+        RenameField(
+            text: item.name,
+            selectionLength: FileRow.baseNameLength(of: item.name),
+            onCommit: { newName in
+                let ok = model.commitRename(newName)
+                if ok {
+                    DispatchQueue.main.async { FocusKeeper.shared.reclaim() }
+                }
+                return ok
+            },
+            onCancel: {
+                model.cancelRename()
+                DispatchQueue.main.async { FocusKeeper.shared.reclaim() }
+            }
+        )
+        .frame(height: 18)
+        .padding(.horizontal, 3)
+        .background {
+            RoundedRectangle(cornerRadius: 3)
+                .fill(Color(nsColor: .textBackgroundColor))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 3)
+                .stroke(Color.accentColor, lineWidth: 1.5)
+        }
+    }
+}
+
+// MARK: - 详细信息行
+
 struct FileRow: View {
+    @ObservedObject var model: BrowserModel
     let item: FileItem
     let isSelected: Bool
     var isRenaming: Bool = false
     var isCut: Bool = false
     var isDropTarget: Bool = false
-    var onCommitRename: (String) -> Bool = { _ in false }
-    var onCancelRename: () -> Void = {}
+    let widths: ColumnWidths
 
     @State private var hovered = false
 
     var body: some View {
-        FileListLayout.row {
+        FileListLayout.row(widths: widths) {
             HStack(spacing: 7) {
                 Image(nsImage: IconProvider.shared.icon(for: item.url))
                     .resizable()
@@ -348,23 +553,8 @@ struct FileRow: View {
                     .frame(width: 16, height: 16)
 
                 if isRenaming {
-                    RenameField(
-                        text: item.name,
-                        selectionLength: Self.baseNameLength(of: item.name),
-                        onCommit: onCommitRename,
-                        onCancel: onCancelRename
-                    )
-                    .frame(height: 18)
-                    .padding(.horizontal, 3)
-                    .background {
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(Color(nsColor: .textBackgroundColor))
-                    }
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 3)
-                            .stroke(Color.accentColor, lineWidth: 1.5)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    RenameInlineView(model: model, item: item)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     Text(item.name)
                         .font(.system(size: 13))
@@ -419,6 +609,121 @@ struct FileRow: View {
 
     private var secondaryColor: Color {
         isSelected ? Color.white.opacity(0.88) : Color.secondary
+    }
+
+    private var backgroundColor: Color {
+        if isSelected { return Color.accentColor }
+        if hovered { return Color.primary.opacity(0.06) }
+        return Color.clear
+    }
+}
+
+// MARK: - 紧凑列表行
+
+struct CompactRow: View {
+    @ObservedObject var model: BrowserModel
+    let item: FileItem
+    let isSelected: Bool
+    var isRenaming: Bool = false
+    var isCut: Bool = false
+    var isDropTarget: Bool = false
+
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(nsImage: IconProvider.shared.icon(for: item.url))
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 16, height: 16)
+
+            if isRenaming {
+                RenameInlineView(model: model, item: item)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text(item.name)
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .foregroundStyle(isSelected ? Color.white : Color.primary)
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.horizontal, FileListLayout.horizontalPadding)
+        .frame(maxWidth: .infinity)
+        .background {
+            RoundedRectangle(cornerRadius: 5)
+                .fill(backgroundColor)
+                .padding(.horizontal, 4)
+        }
+        .opacity(isCut ? 0.5 : 1)
+        .overlay {
+            if isDropTarget {
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(isSelected ? Color.white : Color.accentColor, lineWidth: 2)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .allowsHitTesting(false)
+            }
+        }
+        .onHover { hovered = $0 }
+    }
+
+    private var backgroundColor: Color {
+        if isSelected { return Color.accentColor }
+        if hovered { return Color.primary.opacity(0.06) }
+        return Color.clear
+    }
+}
+
+// MARK: - 图标格
+
+struct IconCell: View {
+    @ObservedObject var model: BrowserModel
+    let item: FileItem
+    let isSelected: Bool
+    var isRenaming: Bool = false
+    var isCut: Bool = false
+    var isDropTarget: Bool = false
+
+    @State private var hovered = false
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(nsImage: IconProvider.shared.icon(for: item.url))
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 44, height: 44)
+
+            if isRenaming {
+                RenameInlineView(model: model, item: item, fontSize: 11)
+                    .frame(maxWidth: .infinity)
+            } else {
+                Text(item.name)
+                    .font(.system(size: 11))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .truncationMode(.middle)
+                    .foregroundStyle(isSelected ? Color.white : Color.primary)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(6)
+        .frame(width: 104, height: 84, alignment: .top)
+        .background {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(backgroundColor)
+        }
+        .opacity(isCut ? 0.5 : 1)
+        .overlay {
+            if isDropTarget {
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(isSelected ? Color.white : Color.accentColor, lineWidth: 2)
+                    .padding(1)
+                    .allowsHitTesting(false)
+            }
+        }
+        .onHover { hovered = $0 }
     }
 
     private var backgroundColor: Color {

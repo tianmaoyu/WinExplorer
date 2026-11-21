@@ -172,6 +172,28 @@ struct BrowserView: View {
             }
         }
 
+        // 1 / 2 / 3 = 切换视图模式（⌘1 详细信息、⌘2 列表、⌘3 图标）
+        if [18, 19, 20].contains(event.keyCode) {
+            let modeFlags: NSEvent.ModifierFlags = [.command, .function]
+            if !flags.intersection(modeFlags).isEmpty, !flags.contains(.control) {
+                switch event.keyCode {
+                case 18: model.viewMode = .details
+                case 19: model.viewMode = .list
+                default: model.viewMode = .icons
+                }
+                return true
+            }
+        }
+
+        // 0 = 自动调整列宽。菜单项在刚切换视图时可能是陈旧的禁用态，这里兜底
+        if event.keyCode == 29 {
+            let fitFlags: NSEvent.ModifierFlags = [.command, .function]
+            if !flags.intersection(fitFlags).isEmpty, !flags.contains(.control) {
+                model.autoFitAllColumns()
+                return true
+            }
+        }
+
         let reserved: NSEvent.ModifierFlags = [.command, .control, .option]
         if !flags.intersection(reserved).isEmpty {
             return false
@@ -181,13 +203,17 @@ struct BrowserView: View {
         case 120: // F2
             model.beginRename()
         case 126: // ↑
-            model.moveFocus(by: -1)
+            model.moveFocusVertically(by: -1)
         case 125: // ↓
-            model.moveFocus(by: 1)
+            model.moveFocusVertically(by: 1)
+        case 123: // ←（仅图标视图用来横向移动）
+            if model.viewMode == .icons { model.moveFocus(by: -1) }
+        case 124: // →（仅图标视图用来横向移动）
+            if model.viewMode == .icons { model.moveFocus(by: 1) }
         case 116: // Page Up
-            model.moveFocus(by: -12)
+            model.moveFocusVertically(by: model.viewMode == .icons ? -3 : -12)
         case 121: // Page Down
-            model.moveFocus(by: 12)
+            model.moveFocusVertically(by: model.viewMode == .icons ? 3 : 12)
         case 115: // Home
             model.focusEdge(first: true)
         case 119: // End
@@ -233,6 +259,18 @@ struct BrowserView: View {
         }
 
         ToolbarItemGroup(placement: .primaryAction) {
+            Picker("视图模式", selection: $model.viewMode) {
+                ForEach(ViewMode.allCases) { mode in
+                    Image(systemName: mode.symbolName)
+                        .tag(mode)
+                        .help(mode.title)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 116)
+            .help("视图模式（⌘1 详细信息 / ⌘2 列表 / ⌘3 图标）")
+
             Button {
                 model.paste()
             } label: {
@@ -247,6 +285,20 @@ struct BrowserView: View {
             .help("新建文件夹（⇧⌘N）")
 
             Menu {
+                Section("视图模式") {
+                    ForEach(ViewMode.allCases) { mode in
+                        Button {
+                            model.viewMode = mode
+                        } label: {
+                            if model.viewMode == mode {
+                                Label(mode.title, systemImage: "checkmark")
+                            } else {
+                                Text(mode.title)
+                            }
+                        }
+                    }
+                }
+
                 Section("排序方式") {
                     ForEach(SortColumn.allCases) { column in
                         Button {

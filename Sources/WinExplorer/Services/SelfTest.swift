@@ -7,9 +7,10 @@ import Foundation
 /// 不弹窗、不碰用户数据。
 enum SelfTest {
     static func runAll() -> Never {
-        // 自检不碰系统剪贴板，复制/移动同步执行以便断言
+        // 自检不碰系统剪贴板，复制/移动同步执行以便断言；也不写用户偏好
         BrowserModel.syncsSystemPasteboard = false
         BrowserModel.runsTransfersSynchronously = true
+        Preferences.enabled = false
 
         var failures = 0
 
@@ -486,6 +487,52 @@ enum SelfTest {
         check("拖拽 provider 能解析出文件 URL",
               resolved.first?.standardizedFileURL.path == dragged.standardizedFileURL.path,
               "解析到 \(resolved.map(\.lastPathComponent))")
+
+        // MARK: 视图与列宽
+        model.navigate(to: clipSrc)
+        model.reload()
+
+        check("默认列宽", model.columnWidths == ColumnWidths.standard,
+              "实际 \(model.columnWidths)")
+
+        model.resizeColumn(.size, to: 5)
+        check("列宽有下限", model.columnWidths.size == ColumnWidths.sizeRange.lowerBound,
+              "实际 \(model.columnWidths.size)")
+        model.resizeColumn(.size, to: 9999)
+        check("列宽有上限", model.columnWidths.size == ColumnWidths.sizeRange.upperBound,
+              "实际 \(model.columnWidths.size)")
+        model.resizeColumn(.size, to: 130)
+        check("列宽可设置", model.columnWidths.size == 130)
+
+        model.autoFitColumn(.kind)
+        check("双击自适应列宽落在合法范围",
+              ColumnWidths.kindRange.contains(model.columnWidths.kind),
+              "实际 \(model.columnWidths.kind)")
+        model.autoFitAllColumns()
+        check("一次性自适应三列",
+              ColumnWidths.sizeRange.contains(model.columnWidths.size)
+                && ColumnWidths.dateRange.contains(model.columnWidths.date)
+                && ColumnWidths.kindRange.contains(model.columnWidths.kind))
+
+        // 图标视图里 ↑↓ 按行走
+        let total = model.items.count
+        model.viewMode = .icons
+        model.gridColumnCount = 3
+        model.focus(url: model.items[0].url)
+        model.moveFocusVertically(by: 1)
+        check("图标视图 ↓ 走一行（3 列）",
+              model.focusedURL?.lastPathComponent == model.items[min(3, total - 1)].url.lastPathComponent,
+              "焦点 \(model.focusedURL?.lastPathComponent ?? "nil")")
+        model.moveFocusVertically(by: -1)
+        check("图标视图 ↑ 回上一行", model.focusedURL == model.items[0].url)
+        model.moveFocus(by: 1)
+        check("图标视图 → 走一格", model.focusedURL == model.items[1].url)
+
+        model.viewMode = .details
+        model.moveFocusVertically(by: 1)
+        check("详细信息视图 ↓ 走一项", model.focusedURL == model.items[2].url)
+
+        check("自检期间不写用户偏好", Preferences.viewMode == .details)
 
         let before = model.currentURL
         model.navigate(to: root.appendingPathComponent("no-such-dir"))

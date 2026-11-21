@@ -104,6 +104,34 @@ struct ExplorerCommands: Commands {
             .disabled(model.textEditor == nil && model.items.isEmpty)
         }
 
+        CommandMenu("视图") {
+            Button("详细信息") {
+                model.viewMode = .details
+            }
+            .keyboardShortcut("1", modifiers: .command)
+
+            Button("列表") {
+                model.viewMode = .list
+            }
+            .keyboardShortcut("2", modifiers: .command)
+
+            Button("图标") {
+                model.viewMode = .icons
+            }
+            .keyboardShortcut("3", modifiers: .command)
+
+            Divider()
+
+            Button("自动调整列宽") {
+                model.autoFitAllColumns()
+            }
+            .keyboardShortcut("0", modifiers: .command)
+            .disabled(model.viewMode != .details)
+
+            Toggle("显示隐藏文件", isOn: $model.showHidden)
+                .keyboardShortcut(".", modifiers: [.command, .shift])
+        }
+
         CommandMenu("前往") {
             Button("后退") {
                 model.goBack()
@@ -133,11 +161,6 @@ struct ExplorerCommands: Commands {
             Button("应用程序") {
                 model.navigate(to: URL(fileURLWithPath: "/Applications"))
             }
-        }
-
-        CommandGroup(after: .sidebar) {
-            Toggle("显示隐藏文件", isOn: $model.showHidden)
-                .keyboardShortcut(".", modifiers: [.command, .shift])
         }
     }
 }

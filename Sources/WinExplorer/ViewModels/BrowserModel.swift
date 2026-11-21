@@ -44,6 +44,20 @@ final class BrowserModel: ObservableObject {
     /// 拖拽悬停中的文件夹行（用于高亮落点）
     @Published var dropTargetURL: URL?
 
+    /// 视图模式
+    @Published var viewMode: ViewMode = Preferences.viewMode {
+        didSet {
+            guard viewMode != oldValue else { return }
+            Preferences.viewMode = viewMode
+        }
+    }
+
+    /// 详细信息视图的列宽
+    @Published private(set) var columnWidths: ColumnWidths = Preferences.columnWidths
+
+    /// 图标视图当前能放下几列（由视图回写，键盘导航要用）
+    @Published var gridColumnCount: Int = 4
+
     /// 自检时关掉，避免动到用户的系统剪贴板
     static var syncsSystemPasteboard = true
     /// 自检时同步执行复制/移动，便于断言（生产路径始终异步）
@@ -160,14 +174,23 @@ final class BrowserModel: ObservableObject {
         )
     }
 
-    @Published var sortColumn: SortColumn = .name {
-        didSet { applySortAndFilter() }
+    @Published var sortColumn: SortColumn = Preferences.sortColumn {
+        didSet {
+            Preferences.sortColumn = sortColumn
+            applySortAndFilter()
+        }
     }
-    @Published var sortAscending: Bool = true {
-        didSet { applySortAndFilter() }
+    @Published var sortAscending: Bool = Preferences.sortAscending {
+        didSet {
+            Preferences.sortAscending = sortAscending
+            applySortAndFilter()
+        }
     }
-    @Published var showHidden: Bool = false {
-        didSet { applySortAndFilter() }
+    @Published var showHidden: Bool = Preferences.showHidden {
+        didSet {
+            Preferences.showHidden = showHidden
+            applySortAndFilter()
+        }
     }
 
     @Published private(set) var backStack: [URL] = []
@@ -189,7 +212,17 @@ final class BrowserModel: ObservableObject {
         // 开发钩子：WINEXPLORER_START=/某个/目录 可直接打开指定目录，便于截图验收
         let envStart = ProcessInfo.processInfo.environment["WINEXPLORER_START"]
             .map { URL(fileURLWithPath: $0) }
-        let requested = url ?? envStart ?? FileManager.default.homeDirectoryForCurrentUser
+
+        // 上次浏览的目录（和资源管理器一样，重开回到原处），目录不在就回个人文件夹
+        let remembered: URL? = Preferences.lastDirectoryPath.flatMap { path in
+            var isDirectory: ObjCBool = false
+            let candidate = URL(fileURLWithPath: path)
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else { return nil }
+            return candidate
+        }
+
+        let requested = url ?? envStart ?? remembered ?? FileManager.default.homeDirectoryForCurrentUser
         let start = requested.standardizedFileURL
         currentURL = start
         load(directory: start, recordHistory: false)
@@ -309,6 +342,7 @@ final class BrowserModel: ObservableObject {
             pendingPermanentDelete = nil
             dropTargetURL = nil
             errorMessage = nil
+            Preferences.lastDirectoryPath = url.path
             applySortAndFilter()
         } catch {
             errorMessage = "无法打开「\(url.lastPathComponent)」：\(error.localizedDescription)"
@@ -424,6 +458,65 @@ final class BrowserModel: ObservableObject {
     func focusEdge(first: Bool) {
         guard let target = first ? items.first : items.last else { return }
         focus(url: target.url)
+    }
+
+    /// ↑↓：图标视图里按「行」跳，其它视图按「项」跳
+    func moveFocusVertically(by rows: Int) {
+        moveFocus(by: viewMode == .icons ? rows * max(gridColumnCount, 1) : rows)
+    }
+
+    // MARK: - 列宽与视图
+
+    func width(for column: ResizableColumn) -> CGFloat {
+        switch column {
+        case .size: return columnWidths.size
+        case .date: return columnWidths.date
+        case .kind: return columnWidths.kind
+        }
+    }
+
+    func resizeColumn(_ column: ResizableColumn, to width: CGFloat) {
+        var widths = columnWidths
+        switch column {
+        case .size:
+            widths.size = clamp(width, ColumnWidths.sizeRange)
+        case .date:
+            widths.date = clamp(width, ColumnWidths.dateRange)
+        case .kind:
+            widths.kind = clamp(width, ColumnWidths.kindRange)
+        }
+        guard widths != columnWidths else { return }
+        columnWidths = widths
+        Preferences.columnWidths = widths
+    }
+
+    /// 双击列边界：按当前目录里最宽的内容把这一列调成刚好
+    func autoFitColumn(_ column: ResizableColumn) {        let font: NSFont = column == .size
+            ? NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+            : NSFont.systemFont(ofSize: 12)
+
+        let texts: [String]
+        switch column {
+        case .size: texts = items.map(\.sizeText)
+        case .date: texts = items.map(\.modifiedText)
+        case .kind: texts = items.map(\.kind)
+        }
+
+        let widest = texts.reduce(CGFloat(0)) { partial, text in
+            max(partial, (text as NSString).size(withAttributes: [.font: font]).width)
+        }
+        resizeColumn(column, to: ceil(widest) + 26)
+    }
+
+    /// 一次把三列都调成刚好
+    func autoFitAllColumns() {
+        for column in ResizableColumn.allCases {
+            autoFitColumn(column)
+        }
+    }
+
+    private func clamp(_ value: CGFloat, _ range: ClosedRange<CGFloat>) -> CGFloat {
+        min(max(value, range.lowerBound), range.upperBound)
     }
 
     // MARK: - 打开 / 操作
