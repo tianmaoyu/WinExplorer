@@ -97,5 +97,5 @@
 | **主线程卡顿检测** | 后台每 100ms 投一次心跳，超时即记录并 dump 卡住前最近 40 条事件 | `RunLog.startHangDetection` |
 | **菜单构建强度** | 资源采样里的 `menuBuilds`：一轮采样内列表重建次数 × 行数。异常高说明视图在反复全量刷新 | `RunLog.recordMenuBuild` |
 | **交替条纹** | 列表相邻行用 `alternatingContentBackgroundColors[1]` 与行底交替，深浅色模式自动适配 | `FileRow.isStriped`（adr/0017） |
-| **列分隔线** | 贯穿表头与行的发丝线，位置由 `dividerX` 统一推算；悬停时变 2pt 强调色提示可拖 | `FileListLayout.columnDivider` |
+| **列分隔线** | **只在表头**画的发丝线（行内不画），位置由 `dividerX` 推算；悬停时变 2pt 强调色提示可拖 | `FileListView.dividerHandle` |
 | **选中高亮内缩** | 访达比例：左右各让 5pt、上下各让 1pt、圆角 5pt；高亮层在条纹之上，会盖住分隔线 | `FileListLayout.selection*Inset` |

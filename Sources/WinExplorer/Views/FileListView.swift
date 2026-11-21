@@ -34,21 +34,13 @@ enum FileListLayout {
     }
 
     /// 列分隔线颜色。`separatorColor` 叠在表头底色上几乎看不见（实测只差 5 级灰），
-    /// 所以直接用「主色 13%」：浅色下是接近 210 的灰、深色下是比底色亮一档，
-    /// 两个模式下都能一眼看出列边界。
+    /// 所以用「主色 26%」：浅色下实测 189（与白底差 66）、深色下更亮一档，
+    /// 一眼能看出列边界，又不至于像表格网格线那样抢内容。
+    ///
+    /// **只用于表头**：列边界在表头上才有意义（那是拖拽列宽的手柄），
+    /// 行里再画线会把列表切成格子，既不符合访达的观感，也干扰读内容。
     static var columnDividerColor: Color {
-        Color.primary.opacity(0.13)
-    }
-
-    /// 某一列的边界竖线（相对行/表头左缘的 x）画成一根发丝线
-    static func columnDivider(_ column: ResizableColumn, widths: ColumnWidths,
-                              totalWidth: CGFloat, height: CGFloat) -> some View {
-        Rectangle()
-            .fill(columnDividerColor)
-            .frame(width: columnDividerWidth, height: max(0, height))
-            .offset(
-                x: dividerX(column, widths: widths, totalWidth: totalWidth) - columnDividerWidth / 2
-            )
+        Color.primary.opacity(0.26)
     }
 
     /// 底部留白：只加在滚动内容的最底部（顶部/中间/左右都不加）。
@@ -791,26 +783,11 @@ struct FileRow: View {
                 .padding(.horizontal, FileListLayout.selectionHorizontalInset)
                 .padding(.vertical, FileListLayout.selectionVerticalInset)
         }
-        // 下层：交替条纹 + 贯穿的列分隔线（选中时被上面的高亮整块盖住）
+        // 下层：交替条纹（选中时被上面的高亮整块盖住）。
+        // 行内**不画**列分隔线：列边界只属于表头，行里画线会把列表切成格子。
         .background {
-            GeometryReader { geometry in
-                ZStack(alignment: .topLeading) {
-                    if isStriped {
-                        FileListLayout.stripeColor
-                    }
-                    ForEach(ResizableColumn.allCases, id: \.self) { column in
-                        FileListLayout.columnDivider(
-                            column,
-                            widths: widths,
-                            totalWidth: geometry.size.width,
-                            height: FileListLayout.rowHeight - FileListLayout.columnDividerInset * 2
-                        )
-                        .offset(y: FileListLayout.columnDividerInset)
-                    }
-                }
-                // 显式撑满：ZStack 的尺寸由子视图决定，不铺开的话条纹只画出一条细带
-                .frame(width: geometry.size.width, height: geometry.size.height,
-                       alignment: .topLeading)
+            if isStriped {
+                FileListLayout.stripeColor
             }
         }
         // 剪切中的项整体变淡（Windows 的"待移动"观感）；未授权项更淡一些
