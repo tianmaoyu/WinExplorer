@@ -108,4 +108,5 @@
 | **级联删除** | 删文件夹时子文件夹与文件一并删除；确认框异步统计并写明数量 | `DeleteConfirmView` |
 | **树缓存原地重读** | 刷新时不丢子项缓存，后台重读后覆盖；避免展开的子树在重读期间整片消失 | `BrowserModel.ensureChildrenLoaded(_:force:)`（adr/0020） |
 | **items / rows** | 数据侧可见项数 与 界面侧行数；两者对不上就是「看不到文件」的直接证据，已进运行日志采样 | `BrowserModel.diagnosticsSummary` |
+| **展开即重读** | 展开文件夹时强制重读磁盘（而不是复用上次的缓存），保证拖拽移动后能看到新内容 | `BrowserModel.toggleExpanded`（adr/0021） |
 

@@ -843,7 +843,10 @@ final class BrowserModel: ObservableObject {
             expandedPaths = expandedPaths.filter { $0 != key && !$0.hasPrefix(prefix) }
         } else {
             expandedPaths.insert(key)
-            ensureChildrenLoaded(url)
+            // **展开时强制重读**（adr/0021）：缓存可能来自上一次展开，
+            // 这期间外部程序、拖拽移动、终端命令都可能改过里面的内容。
+            // 用缓存展开就会出现「刚拖进去的文件不见了」。
+            ensureChildrenLoaded(url, force: true)
         }
         RunLog.shared.log(.user, "树形展开变更 count=\(expandedPaths.count) rows=\(treeRows.count) \(key)")
         rebuildTreeRows()
@@ -1966,6 +1969,7 @@ final class BrowserModel: ObservableObject {
             if !done.isEmpty { registerUndo(transferUndo(done, targetName: targetName)) }
             reload()
             select(urls: done.map(\.destination))
+            RunLog.shared.log(.user, "移动完成 \(done.count)/\(requests.count) → \(targetDir.path) 失败=\(failures.count)")
             if failures.isEmpty {
                 showFlash(L("已移动 \(done.count) 项到「\(targetName)」", "Moved \(done.count) item(s) to “\(targetName)”"))
             } else {

@@ -1479,6 +1479,37 @@ enum SelfTest {
         check("树形：新建落在指定文件夹里",
               fm.fileExists(atPath: treeSub.appendingPathComponent(L("新建文件夹", "New Folder")).path))
 
+        // 拖拽移动后展开目标目录：必须看到新移入的文件（adr/0021）
+        let moveSrc = treeRoot.appendingPathComponent("movesrc")
+        let moveDst = treeRoot.appendingPathComponent("movedst")
+        try? fm.createDirectory(at: moveSrc, withIntermediateDirectories: false)
+        try? fm.createDirectory(at: moveDst, withIntermediateDirectories: false)
+        let payload = moveSrc.appendingPathComponent("payload.txt")
+        fm.createFile(atPath: payload.path, contents: Data("x".utf8))
+
+        model.navigate(to: treeRoot)
+        // 先展开一次把缓存建立起来（空目录 → 缓存空数组），再折叠
+        model.toggleExpanded(moveDst)
+        waitForChildren(moveDst)
+        check("移动前：目标目录展开过（缓存已建立）",
+              model.expandedPaths.contains(moveDst.standardizedFileURL.path))
+        model.toggleExpanded(moveDst)
+        check("移动前：目标目录已折叠", !model.expandedPaths.contains(moveDst.standardizedFileURL.path))
+
+        // 把文件移进去（同卷移动，走的就是拖拽那条通道）
+        model.moveItems([payload], to: moveDst)
+        check("拖拽移动：源文件已不在原处", !fm.fileExists(atPath: payload.path))
+        check("拖拽移动：文件到了目标目录",
+              fm.fileExists(atPath: moveDst.appendingPathComponent("payload.txt").path))
+
+        // 再展开：缓存是「移入之前」的，必须被重读覆盖
+        model.toggleExpanded(moveDst)
+        waitForChildren(moveDst)
+        check("拖拽移动：重新展开能看到移入的文件",
+              model.treeRows.contains { $0.item.name == "payload.txt" },
+              "rows=\(model.treeRows.map(\.item.name))")
+        model.toggleExpanded(moveDst)
+
         // 搜索时退化为扁平：只匹配当前层，不跨层展开
         model.toggleExpanded(treeSub)
         waitForChildren(treeSub)
