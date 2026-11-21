@@ -66,6 +66,9 @@ struct FileListView: View {
                         Color(nsColor: .textBackgroundColor)
                             .contentShape(Rectangle())
                             .onTapGesture {
+                                // 点空白 = 放下当前一切输入状态（adr/0005）：
+                                // 取消选中、退出地址栏编辑；搜索过滤词保留
+                                model.cancelPathEditing()
                                 model.clearSelection()
                             }
                             .contextMenu {

@@ -451,6 +451,8 @@ final class BrowserModel: ObservableObject {
 
     /// ⌘F：把焦点放进搜索框并全选已有内容
     func beginSearch() {
+        // 聚焦搜索框 = 放弃地址栏编辑（两个输入状态互斥，adr/0005）
+        cancelPathEditing()
         searchFocusRequest = UUID()
     }
 
@@ -741,6 +743,8 @@ final class BrowserModel: ObservableObject {
 
     /// 单击：按修饰键决定单选 / ⌘ 加选 / Shift 连选
     func handleClick(on item: FileItem, modifiers: NSEvent.ModifierFlags) {
+        // 用户把注意力转回列表：地址栏编辑态是独占输入状态，必须让位（adr/0005）
+        cancelPathEditing()
         let shift = modifiers.contains(.shift)
         let command = modifiers.contains(.command)
 

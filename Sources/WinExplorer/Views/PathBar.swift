@@ -274,10 +274,11 @@ struct PathBar: View {
 
     /// 右上角搜索框：只过滤当前文件夹，不递归。占位文案带上当前目录名（对齐 Win11）
     private var searchBox: some View {
-        SearchField(
+        SearchBox(
             text: model.searchText,
             focusToken: model.searchFocusRequest,
             placeholder: searchPlaceholder,
+            cornerRadius: cornerRadius,
             onChange: { model.searchText = $0 },
             onSubmit: {
                 // 回车确认搜索：焦点还回列表，方向键可以继续挑结果
@@ -286,6 +287,12 @@ struct PathBar: View {
             onCancel: {
                 model.clearSearch()
                 DispatchQueue.main.async { FocusKeeper.shared.reclaim(force: true) }
+            },
+            onEditingChange: { editing in
+                // 聚焦搜索框 = 放弃地址栏编辑（两个输入状态互斥，adr/0005）
+                if editing {
+                    model.cancelPathEditing()
+                }
             }
         )
     }

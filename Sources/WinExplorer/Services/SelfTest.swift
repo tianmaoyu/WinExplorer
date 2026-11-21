@@ -1312,6 +1312,29 @@ enum SelfTest {
             check("dry-run 不启动终端", TerminalService.open(newRoot, app: terminal, dryRun: true))
         }
 
+        // MARK: 地址栏编辑态的退出时机（adr/0005）
+        let editModel = BrowserModel(startAt: newRoot)
+        editModel.beginPathEditing()
+        check("进入地址栏编辑态", editModel.isEditingPath)
+        if let file = editModel.items.first(where: { !$0.isDirectory }) {
+            editModel.handleClick(on: file, modifiers: [])
+            check("点文件行退出编辑态", !editModel.isEditingPath)
+        } else {
+            check("点文件行退出编辑态", false, "目录里没有文件")
+        }
+        editModel.beginPathEditing()
+        editModel.clearSelection()
+        // 「点空白退出编辑态」绑定在 View 层的点击交互上（cancelPathEditing），
+        // clearSelection 本身被拖拽 / 刷新等内部路径共用，必须不退编辑态
+        check("clearSelection 单独调用不退编辑态", editModel.isEditingPath)
+        editModel.cancelPathEditing()
+        check("显式取消（点空白路径）退出编辑态", !editModel.isEditingPath)
+        editModel.beginPathEditing()
+        editModel.beginSearch()
+        check("聚焦搜索框退出编辑态", !editModel.isEditingPath)
+        check("Esc 取消语义保持",
+              !editModel.isEditingPath && editModel.pathError == nil)
+
         check("本地化按当前语言取文案", L("甲", "A") == (L10n.isEnglish ? "A" : "甲"))
 
         let before = model.currentURL

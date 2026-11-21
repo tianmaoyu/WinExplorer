@@ -54,3 +54,13 @@
 | **新建类型** | `NewFileKind`：txt / md / csv / rtf / docx / xlsx / pptx，带默认名、扩展名与菜单图标 | `NewFileKind` |
 | **编号命名** | 重名时 `基名 2.扩展名` 递增，与 Windows 一致 | `BrowserModel.createFile` |
 | **终端转交** | 把文件夹 URL 交给终端应用（LaunchServices），终端自己开新窗口并 cd；不用 AppleScript，避免自动化授权弹框 | `TerminalService` |
+
+## 地址栏编辑态（v1.3.1 补充）
+
+| 词 | 含义 | 对应代码 |
+|---|---|---|
+| **编辑态** | 地址栏的独占输入状态：白底 + 强调色焦点环，面包屑暂被替换 | `BrowserModel.isEditingPath` |
+| **编辑态退出** | 用户把注意力转回列表时必须退出：点空白 / 点文件 / ⌘F 聚焦搜索；Esc / Enter / 导航照旧 | `cancelPathEditing` |
+| **搜索容器** | 与地址栏同一套填充 / 描边 / 圆角 / 高度 / 聚焦环的搜索框外观；`NSSearchField` 只保留键盘行为 | `SearchBox` |
+| **焦点汇报** | 用 `becomeFirstResponder / resignFirstResponder` 而不是 `controlTextDidBeginEditing` —— 后者在只聚焦未打字时不触发 | `FocusReportingSearchField` |
+| **过滤保留** | 点列表空白不清搜索词；Esc 第一次清词、第二次退出搜索 | `SearchBox` |
