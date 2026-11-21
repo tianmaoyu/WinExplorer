@@ -53,6 +53,11 @@ enum SnapshotSupport {
                         model.dropTargetURL = URL(fileURLWithPath: String(key.dropFirst("drop:".count)))
                         return
                     }
+                    if key.hasPrefix("type:") {
+                        // 往当前焦点文本框里输入一段文字（模拟打字，用于地址栏验证）
+                        typeText(String(key.dropFirst("type:".count)))
+                        return
+                    }
                     postKey(key, to: window)
                 }
             }
@@ -67,8 +72,7 @@ enum SnapshotSupport {
     }
 
     /// 在指定行上模拟"按下 + 拖动"，配合 WINEXPLORER_DRAG_DRYRUN=1 验证拖拽发起逻辑
-    private static func dryRunDrag(path: String, window: NSWindow) {
-        let url = URL(fileURLWithPath: path)
+    private static func dryRunDrag(path: String, window: NSWindow) {        let url = URL(fileURLWithPath: path)
         guard let frame = RowProbeRegistry.shared.windowFrame(for: url) else {
             FileHandle.standardError.write(Data("snapshot: 找不到行 \(path)\n".utf8))
             return
@@ -79,6 +83,15 @@ enum SnapshotSupport {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
             sendMouse(.leftMouseDragged, at: NSPoint(x: start.x + 14, y: start.y + 14), window: window)
         }
+    }
+
+    /// 往当前焦点文本框里插入文字（替换选区）
+    private static func typeText(_ text: String) {
+        guard let editor = NSApp.keyWindow?.firstResponder as? NSTextView else {
+            FileHandle.standardError.write(Data("snapshot: 当前没有可输入的文本框\n".utf8))
+            return
+        }
+        editor.insertText(text, replacementRange: editor.selectedRange())
     }
 
     private static func sendMouse(_ type: NSEvent.EventType, at point: NSPoint, window: NSWindow) {

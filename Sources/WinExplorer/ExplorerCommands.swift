@@ -133,6 +133,13 @@ struct ExplorerCommands: Commands {
         }
 
         CommandMenu("前往") {
+            Button("编辑地址栏…") {
+                model.beginPathEditing()
+            }
+            .keyboardShortcut("l", modifiers: .command)
+
+            Divider()
+
             Button("后退") {
                 model.goBack()
             }

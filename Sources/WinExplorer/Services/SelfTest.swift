@@ -534,6 +534,80 @@ enum SelfTest {
 
         check("自检期间不写用户偏好", Preferences.viewMode == .details)
 
+        // MARK: 地址栏（可编辑路径）
+        let pathRoot = root.appendingPathComponent("路径测试")
+        let pathDocs = pathRoot.appendingPathComponent("文档")
+        let pathDesktop = pathRoot.appendingPathComponent("桌面")
+        try? fm.createDirectory(at: pathDocs, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: pathDesktop, withIntermediateDirectories: true)
+        let pathFile = pathDocs.appendingPathComponent("说明.txt")
+        fm.createFile(atPath: pathFile.path, contents: Data("说明".utf8))
+
+        model.navigate(to: pathRoot)
+        model.beginPathEditing()
+        check("⌘L 进入编辑并带上当前路径",
+              model.isEditingPath && model.pathDraft == model.currentURL.path,
+              "draft=\(model.pathDraft)")
+
+        check("回车提交当前目录", model.commitPathEditing(model.currentURL.path))
+        check("提交后退出编辑态", !model.isEditingPath && model.pathError == nil)
+
+        // 不存在的路径：拒绝并留在编辑态
+        model.beginPathEditing()
+        let rejected = model.commitPathEditing("/tmp/绝对不存在的目录-\(UUID().uuidString)")
+        check("不存在的路径被拒绝", !rejected && model.isEditingPath)
+        check("拒绝时给出提示", model.pathError != nil)
+        check("拒绝时不改当前目录", model.currentURL == pathRoot.standardizedFileURL)
+
+        // 输入文件路径：跳到父目录并选中该文件
+        check("输入文件路径可以跳转", model.commitPathEditing(pathFile.path))
+        check("文件路径跳到父目录", model.currentURL == pathDocs.standardizedFileURL)
+        check("文件路径会选中文件",
+              model.selection.contains {
+                  $0.standardizedFileURL.path == pathFile.standardizedFileURL.path
+              },
+              "选中 \(model.selection.map(\.lastPathComponent))")
+
+        // 空白输入 = 取消
+        model.beginPathEditing()
+        check("空白输入直接取消", model.commitPathEditing("   "))
+        check("取消后仍在原目录", model.currentURL == pathDocs.standardizedFileURL)
+
+        // Esc 取消
+        model.beginPathEditing()
+        model.cancelPathEditing()
+        check("Esc 取消编辑", !model.isEditingPath && model.pathError == nil)
+
+        // 补全：唯一匹配、多匹配取公共前缀、目录补斜杠、没有匹配返回 nil
+        let completionRoot = root.appendingPathComponent("补全测试")
+        try? fm.createDirectory(at: completionRoot.appendingPathComponent("苹果目录"), withIntermediateDirectories: true)
+        fm.createFile(atPath: completionRoot.appendingPathComponent("苹果笔记.txt").path, contents: Data())
+        fm.createFile(atPath: completionRoot.appendingPathComponent("香蕉.txt").path, contents: Data())
+
+        check("补全唯一匹配",
+              model.completePath(completionRoot.appendingPathComponent("香").path)
+                == completionRoot.appendingPathComponent("香蕉.txt").path,
+              "实际 \(model.completePath(completionRoot.appendingPathComponent("香").path) ?? "nil")")
+
+        check("补全多个匹配取公共前缀",
+              model.completePath(completionRoot.appendingPathComponent("苹").path)
+                == completionRoot.appendingPathComponent("苹果").path,
+              "实际 \(model.completePath(completionRoot.appendingPathComponent("苹").path) ?? "nil")")
+
+        let dirCompletion = model.completePath(completionRoot.appendingPathComponent("苹果目").path)
+        check("补全目录时补上斜杠",
+              dirCompletion?.hasSuffix("/") == true,
+              "实际 \(dirCompletion ?? "nil")")
+
+        check("没有匹配返回 nil",
+              model.completePath(completionRoot.appendingPathComponent("zzz").path) == nil)
+
+        // ~ 展开
+        let homeCompletion = model.completePath("~")
+        check("~ 能展开成个人文件夹",
+              homeCompletion?.hasPrefix(fm.homeDirectoryForCurrentUser.path) == true,
+              "实际 \(homeCompletion ?? "nil")")
+
         let before = model.currentURL
         model.navigate(to: root.appendingPathComponent("no-such-dir"))
         check("打不开的目录给出提示而不是崩溃",

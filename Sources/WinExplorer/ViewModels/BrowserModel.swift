@@ -44,6 +44,13 @@ final class BrowserModel: ObservableObject {
     /// 拖拽悬停中的文件夹行（用于高亮落点）
     @Published var dropTargetURL: URL?
 
+    /// 地址栏是否处于编辑态
+    @Published private(set) var isEditingPath = false
+    /// 地址栏编辑中的文本
+    @Published var pathDraft: String = ""
+    /// 地址栏编辑的错误提示（路径不存在等）
+    @Published private(set) var pathError: String?
+
     /// 视图模式
     @Published var viewMode: ViewMode = Preferences.viewMode {
         didSet {
@@ -328,6 +335,103 @@ final class BrowserModel: ObservableObject {
         errorMessage = nil
     }
 
+    // MARK: - 地址栏
+
+    func beginPathEditing() {
+        guard !isEditingPath else { return }
+        pathError = nil
+        pathDraft = currentURL.path
+        isEditingPath = true
+    }
+
+    func cancelPathEditing() {
+        guard isEditingPath else { return }
+        isEditingPath = false
+        pathError = nil
+    }
+
+    /// 返回 false 表示这次输入不被接受（路径不存在），输入框会留在编辑态
+    @discardableResult
+    func commitPathEditing(_ raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            cancelPathEditing()
+            return true
+        }
+
+        let expanded = (trimmed as NSString).expandingTildeInPath
+        let candidate = URL(fileURLWithPath: expanded).standardizedFileURL
+
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: candidate.path, isDirectory: &isDirectory) else {
+            pathError = "找不到「\(trimmed)」"
+            return false
+        }
+
+        isEditingPath = false
+        pathError = nil
+
+        if isDirectory.boolValue {
+            navigate(to: candidate)
+        } else {
+            // 输入的是文件：跳到它所在目录并选中它（和资源管理器一致）
+            navigate(to: candidate.deletingLastPathComponent())
+            focus(url: candidate)
+        }
+        return true
+    }
+
+    /// Tab 补全：按前缀在当前目录里找，多个匹配时取公共前缀
+    func completePath(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+
+        let expanded = (trimmed as NSString).expandingTildeInPath
+        let directoryPath: String
+        let prefix: String
+
+        if expanded.hasSuffix("/") {
+            directoryPath = String(expanded.dropLast())
+            prefix = ""
+        } else {
+            directoryPath = (expanded as NSString).deletingLastPathComponent
+            prefix = (expanded as NSString).lastPathComponent
+        }
+
+        let directory = directoryPath.isEmpty ? "/" : directoryPath
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: directory) else {
+            return nil
+        }
+
+        let matches = entries
+            .filter { $0.lowercased().hasPrefix(prefix.lowercased()) }
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        guard let first = matches.first else { return nil }
+
+        var common = first
+        for other in matches.dropFirst() {
+            common = Self.commonPrefix(common, other)
+            if common.isEmpty { break }
+        }
+        guard !common.isEmpty else { return nil }
+
+        var completed = (directory as NSString).appendingPathComponent(common)
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: completed, isDirectory: &isDirectory), isDirectory.boolValue {
+            completed += "/"
+        }
+        return completed
+    }
+
+    private static func commonPrefix(_ lhs: String, _ rhs: String) -> String {
+        var result = ""
+        for (left, right) in zip(lhs, rhs) {
+            guard left == right else { break }
+            result.append(left)
+        }
+        return result
+    }
+
     private func load(directory url: URL, recordHistory: Bool) {
         do {
             let loaded = try FileSystemService.contents(of: url)
@@ -342,6 +446,8 @@ final class BrowserModel: ObservableObject {
             pendingPermanentDelete = nil
             dropTargetURL = nil
             errorMessage = nil
+            isEditingPath = false
+            pathError = nil
             Preferences.lastDirectoryPath = url.path
             applySortAndFilter()
         } catch {

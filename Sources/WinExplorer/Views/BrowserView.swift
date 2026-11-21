@@ -185,6 +185,15 @@ struct BrowserView: View {
             }
         }
 
+        // L = 编辑地址栏（⌘L），同样兼容 Command 被重映射后的 fn+L
+        if event.keyCode == 37 {
+            let editFlags: NSEvent.ModifierFlags = [.command, .function]
+            if !flags.intersection(editFlags).isEmpty, !flags.contains(.control) {
+                model.beginPathEditing()
+                return true
+            }
+        }
+
         // 0 = 自动调整列宽。菜单项在刚切换视图时可能是陈旧的禁用态，这里兜底
         if event.keyCode == 29 {
             let fitFlags: NSEvent.ModifierFlags = [.command, .function]
