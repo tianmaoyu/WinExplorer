@@ -1387,6 +1387,40 @@ enum SelfTest {
 
         check("本地化按当前语言取文案", L("甲", "A") == (L10n.isEnglish ? "A" : "甲"))
 
+        // MARK: 打开方式（adr/0010）
+        // 只做查询类断言：不真的打开应用，也不改系统默认设置
+        let probeFile = root.appendingPathComponent("small.txt")
+        let candidates = OpenWithService.applications(for: probeFile)
+        check("打开方式：能列出候选应用", !candidates.isEmpty)
+        check("打开方式：候选都是 .app 包",
+              candidates.allSatisfy { $0.url.pathExtension == "app" },
+              "实际 \(candidates.map(\.name))")
+        check("打开方式：候选按 id 去重",
+              Set(candidates.map(\.id)).count == candidates.count)
+        check("打开方式：能查到默认应用",
+              OpenWithService.defaultApplication(for: probeFile) != nil)
+
+        let missingApp = OpenWithService.App(
+            url: URL(fileURLWithPath: "/Applications/__winexplorer_missing__.app"),
+            name: "Missing"
+        )
+        check("打开方式：识别不可用的应用", !OpenWithService.isAvailable(missingApp))
+
+        var openFailure: OpenWithService.Failure?
+        OpenWithService.open([probeFile], with: missingApp) { openFailure = $0 }
+        check("打开方式：不可用应用给出错误而不是静默失败", openFailure != nil)
+        if case .applicationUnavailable = openFailure {} else {
+            check("打开方式：错误类型是「应用不可用」", false, "实际 \(String(describing: openFailure))")
+        }
+        check("打开方式：应用不可用的文案可读",
+              OpenWithService.message(for: .applicationUnavailable("Missing"))
+                .contains("Missing"))
+        check("打开方式：设置默认也会先校验应用存在",
+              OpenWithService.setDefault(missingApp, for: probeFile) != nil)
+
+        check("打开方式：目录项不给「设为默认」（文件夹没有默认应用概念）",
+              model.items.contains { $0.isDirectory })
+
         let before = model.currentURL
         model.navigate(to: root.appendingPathComponent("no-such-dir"))
         check("打不开的目录给出提示而不是崩溃",

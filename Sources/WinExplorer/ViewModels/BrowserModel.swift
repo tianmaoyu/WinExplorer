@@ -1027,6 +1027,67 @@ final class BrowserModel: ObservableObject {
         showFlash(message)
     }
 
+    // MARK: - 打开方式（adr/0010）
+
+    /// 候选应用缓存（按扩展名）。右键菜单每次渲染都会问一次，
+    /// `urlsForApplications` 是同步 LaunchServices 查询，不缓存会明显拖慢菜单弹出。
+    private var openWithCache: [String: [OpenWithService.App]] = [:]
+
+    /// 「打开方式」子菜单要列出的应用：按文件类型查系统里能打开它的应用
+    func openWithCandidates(for item: FileItem) -> [OpenWithService.App] {
+        let key = item.url.pathExtension.lowercased()
+        if let cached = openWithCache[key] { return cached }
+        let apps = OpenWithService.applications(for: item.url)
+        openWithCache[key] = apps
+        return apps
+    }
+
+    /// 当前默认打开方式（双击会用谁）
+    func defaultOpenWithApp(for item: FileItem) -> OpenWithService.App? {
+        OpenWithService.defaultApplication(for: item.url)
+    }
+
+    /// 用指定应用**一次性**打开：多选时打开全部选中项，不改系统默认应用
+    func open(_ item: FileItem, withApp app: OpenWithService.App) {
+        let targets = targetItemsForOpenWith(item)
+        guard !targets.isEmpty else { return }
+        if blockedByUnauthorized(targets) { return }
+
+        OpenWithService.open(targets.map(\.url), with: app) { [weak self] failure in
+            guard let self else { return }
+            if let failure {
+                self.errorMessage = OpenWithService.message(for: failure)
+            } else {
+                self.showFlash(L("已用「\(app.name)」打开", "Opened with \(app.name)"))
+            }
+        }
+    }
+
+    /// 选一个应用来一次性打开（面板取消 = 什么都不做，不报错）
+    func openWithPicker(_ item: FileItem) {
+        guard let app = OpenWithService.pickApplication() else { return }
+        open(item, withApp: app)
+    }
+
+    /// 选一个应用并设为该类文件的默认打开方式
+    func setDefaultOpenWithApp(_ item: FileItem) {
+        guard let app = OpenWithService.pickApplication() else { return }
+        if let failure = OpenWithService.setDefault(app, for: item.url) {
+            errorMessage = OpenWithService.message(for: failure)
+        } else {
+            showFlash(L("「\(item.url.pathExtension)」文件默认用「\(app.name)」打开",
+                        "“\(item.url.pathExtension)” files now open with \(app.name)"))
+        }
+    }
+
+    /// 打开方式的作用对象：该项在选中集合里就作用于整个选择，否则只作用于它自己
+    private func targetItemsForOpenWith(_ item: FileItem) -> [FileItem] {
+        if selection.contains(item.url), selectedItems.count > 1 {
+            return selectedItems
+        }
+        return [item]
+    }
+
     func revealInFinder(_ item: FileItem) {
         NSWorkspace.shared.activateFileViewerSelecting([item.url])
     }

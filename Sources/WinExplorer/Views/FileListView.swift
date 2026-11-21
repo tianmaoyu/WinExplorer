@@ -381,6 +381,35 @@ struct FileListView: View {
                 model.open(item)
             }
         }
+        // 「打开方式」：候选应用一次性打开 + 选其他应用 + 设为默认（adr/0010）
+        Menu(L("打开方式", "Open With")) {
+            let candidates = model.openWithCandidates(for: item)
+            let defaultApp = model.defaultOpenWithApp(for: item)
+
+            if candidates.isEmpty {
+                Text(L("没有可用的应用", "No apps available"))
+            } else {
+                ForEach(candidates) { app in
+                    Button(app.id == defaultApp?.id
+                           ? L("\(app.name)（默认）", "\(app.name) (default)")
+                           : app.name) {
+                        model.open(item, withApp: app)
+                    }
+                }
+            }
+
+            Divider()
+
+            Button(L("其他…", "Other…")) {
+                model.openWithPicker(item)
+            }
+            // 文件夹没有「默认打开方式」的概念，不给这一项
+            if !item.isFolderLike {
+                Button(L("设为默认打开方式…", "Set Default App…")) {
+                    model.setDefaultOpenWithApp(item)
+                }
+            }
+        }
         Button(L("快速预览", "Quick Look")) {
             if !inSelection { model.selectOnly(item) }
             model.toggleQuickLook()

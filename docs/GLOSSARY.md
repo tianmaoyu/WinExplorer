@@ -79,4 +79,7 @@
 | **弹性空白** | `NSToolbar` 的 `flexibleSpace` item：占住剩余宽度把后面的 item 顶到最右。SwiftUI 不暴露，只能经 AppKit 插入 | `ToolbarRightAlignFix` |
 | **工具栏定宽幻觉** | SwiftUI 工具栏 item 只按内容理想尺寸布局，`Spacer` / `maxWidth(.infinity)` 都撑不开 | `ToolbarRightAlignFix` 注释 |
 | **标签卡** | Win11 风格的标签视觉：激活=白色圆角卡片+轻投影，未激活=透明，悬停=浅色卡，`×` 激活常显/悬停显示 | `TabChip`（adr/0009） |
-
+| **打开方式** | 右键子菜单：列出系统里能打开该类型文件的应用（默认应用置顶标「（默认）」），可一次性打开或设为默认 | `OpenWithService`（adr/0010） |
+| **候选应用** | LaunchServices 认为能打开该文件的 `.app`，按 bundle id 去重、名称排序、上限 8，按扩展名缓存 | `OpenWithService.applications(for:)` |
+| **一次性打开** | 用指定应用打开，不改系统默认角色绑定 | `NSWorkspace.open(_:withApplicationAt:)` |
+| **默认应用** | 该类文件（按 UTI）在系统里绑定的默认打开应用，双击等同此行为 | `NSWorkspace.setDefaultApplication(at:toOpenFileAt:)` |
