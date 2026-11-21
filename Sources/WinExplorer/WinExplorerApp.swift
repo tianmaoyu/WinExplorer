@@ -4,7 +4,8 @@ import SwiftUI
 @main
 struct WinExplorerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var tabs = TabsModel()
+    /// 菜单命令作用于聚焦窗口的标签组；每个窗口有自己独立的 TabsModel（adr/0007）
+    @FocusedObject private var focusedTabs: TabsModel?
 
     init() {
         // 截图验收用：WINEXPLORER_APPEARANCE=dark|light 强制外观，默认跟随系统
@@ -18,14 +19,23 @@ struct WinExplorerApp: App {
 
     var body: some Scene {
         Window("WinExplorer", id: "main") {
-            RootView(tabs: tabs)
+            WindowRootView()
                 .frame(minWidth: 840, minHeight: 500)
         }
         .defaultSize(width: 1060, height: 680)
-        .windowToolbarStyle(.unified)
         .commands {
-            ExplorerCommands(tabs: tabs)
+            ExplorerCommands(tabs: focusedTabs)
         }
+    }
+}
+
+/// 一个窗口一份 TabsModel —— 多窗口彼此完全独立：
+/// 各自的标签组、目录、历史、选中，窗口间拖拽传文件由 macOS 原生支持（adr/0007）。
+private struct WindowRootView: View {
+    @StateObject private var tabs = TabsModel()
+
+    var body: some View {
+        RootView(tabs: tabs)
     }
 }
 

@@ -124,7 +124,6 @@ struct BrowserView: View {
             StatusBar(model: model)
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .navigationTitle(model.titleText)
     }
 
     private func errorBanner(_ message: String) -> some View {
@@ -357,6 +356,13 @@ struct BrowserView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
+        // 标签栏在工具栏中央，常驻显示 —— Windows 11 的形态（adr/0006）：
+        // 标签 chip + 「+」永远可见，拖文件到 chip / + 也能传文件
+        ToolbarItem(placement: .principal) {
+            TabBarView(tabs: tabs)
+                .frame(maxWidth: 520)
+        }
+
         ToolbarItemGroup(placement: .navigation) {
             Button(action: model.goBack) {
                 Image(systemName: "chevron.left")

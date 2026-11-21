@@ -44,9 +44,16 @@ final class BrowserModel: ObservableObject {
     /// 压缩 / 解压这类"拿不到细粒度进度"的任务（nil 表示空闲）
     @Published private(set) var archiveBusy: TransferProgress?
     private var archiveTask: ArchiveTask?
+    private var clipboardCancellable: AnyCancellable?
 
-    /// 应用内文件剪贴板（复制 / 剪切）
-    @Published private(set) var clipboard: FileClipboard?
+    /// 应用内文件剪贴板（复制 / 剪切）。
+    /// 底层是全局共享的 ClipboardStore：⌘C 在标签 A / 窗口 A，切到标签 B 直接 ⌘V
+    /// （Windows 剪贴板本来就是全局的，adr/0006）。订阅广播保证
+    /// 「剪切中变淡」在所有标签和窗口同步刷新。
+    var clipboard: FileClipboard? {
+        get { ClipboardStore.shared.item }
+        set { ClipboardStore.shared.set(newValue) }
+    }
     /// 正在进行的复制 / 跨卷移动（nil 表示空闲）
     @Published private(set) var transfer: TransferProgress?
     private var transferCancellation: TransferCancellation?
@@ -299,6 +306,12 @@ final class BrowserModel: ObservableObject {
         // 外部程序在这个目录里新建/删除/改名时自动刷新
         directoryWatcher.onChange = { [weak self] in
             self?.handleDirectoryChange()
+        }
+
+        // 全局剪贴板变化 → 本模型也发 objectWillChange，
+        // 让「剪切中变淡」在所有标签 / 窗口里同步刷新
+        clipboardCancellable = ClipboardStore.shared.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
         }
     }
 

@@ -236,6 +236,16 @@ enum SnapshotSupport {
     }
 
     private static func capture(window: NSWindow, to path: String) {
+        // contentView 不含标题栏与工具栏（NSWindow 的 chrome 不在 contentView 里）；
+        // 验收工具栏（如标签栏）时用 WINEXPLORER_SNAPSHOT_FULL=1 抓整个窗口视图
+        if ProcessInfo.processInfo.environment["WINEXPLORER_SNAPSHOT_FULL"] == "1",
+           let fullView = window.contentView?.superview {
+            if capture(view: fullView, to: path) {
+                // 渲染过窗口 chrome 后 NSApp.terminate 会卡在绘制事务里被外层杀掉
+                //（exit 137），截图模式本来就用于自退，直接退出
+                exit(0)
+            }
+        }
         capture(view: window.contentView, to: path)
 
         // SwiftUI 的 alert 会以 sheet 形式出现，主窗口截图里看不到，单独存一张

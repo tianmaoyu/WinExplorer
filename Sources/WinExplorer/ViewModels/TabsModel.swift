@@ -1,7 +1,8 @@
+import AppKit
 import Foundation
 
 /// 一个窗口里的多个标签页。每个标签是一份完整的 BrowserModel
-/// （各自的目录、历史栈、选择、搜索、剪贴板视图），互不干扰。
+/// （各自的目录、历史栈、选择、搜索），互不干扰；剪贴板与拖放是全局共享的。
 final class TabsModel: ObservableObject {
     @Published private(set) var tabs: [BrowserModel]
     @Published private(set) var activeIndex: Int
@@ -83,6 +84,45 @@ final class TabsModel: ObservableObject {
         if let index = tabs.firstIndex(where: { $0.id == activeID }) {
             activeIndex = index
         }
+    }
+
+    // MARK: - 拖文件到标签上传文件（adr/0006）
+
+    /// 把拖进来的文件放入指定标签的当前目录，并切到那个标签。
+    /// 标签间与窗口间传文件共用这一个入口。
+    func receiveDrop(_ urls: [URL], intoTabAt index: Int, modifiers: NSEvent.ModifierFlags) {
+        guard tabs.indices.contains(index) else { return }
+        select(index)
+        let target = tabs[index]
+        target.drop(urls: urls, into: target.currentURL, modifiers: modifiers)
+    }
+
+    /// 拖文件到 + 号：新建一个标签（沿用当前目录）并直接放入
+    func receiveDropOnPlus(_ urls: [URL], modifiers: NSEvent.ModifierFlags) {
+        guard !urls.isEmpty else { return }
+        let model = newTab()
+        model.drop(urls: urls, into: model.currentURL, modifiers: modifiers)
+    }
+
+    /// 文件悬停在标签 chip 上 0.6 秒后自动切过去（Chrome / Windows 11 行为）。
+    /// 必须主线程调度 —— dropEntered 回调本来就在主线程。
+    private var pendingSwitchWork: DispatchWorkItem?
+
+    func scheduleAutoSwitch(to id: UUID) {
+        pendingSwitchWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            if let index = tabs.firstIndex(where: { $0.id == id }) {
+                select(index)
+            }
+        }
+        pendingSwitchWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+    }
+
+    func cancelAutoSwitch() {
+        pendingSwitchWork?.cancel()
+        pendingSwitchWork = nil
     }
 }
 

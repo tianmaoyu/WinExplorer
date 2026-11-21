@@ -1335,6 +1335,50 @@ enum SelfTest {
         check("Esc 取消语义保持",
               !editModel.isEditingPath && editModel.pathError == nil)
 
+        // MARK: 标签 / 窗口间传文件（adr/0006、0007）
+        let xferSrc = root.appendingPathComponent("dropSrc")
+        let xferDst = root.appendingPathComponent("dropDst")
+        try? fm.createDirectory(at: xferSrc, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: xferDst, withIntermediateDirectories: true)
+        let sharedFile = xferSrc.appendingPathComponent("跨.txt")
+        fm.createFile(atPath: sharedFile.path, contents: Data("c".utf8))
+
+        let srcModel = BrowserModel(startAt: xferSrc)
+        let dstModel = BrowserModel(startAt: xferDst)
+        srcModel.selectAll()
+        srcModel.copySelection()
+        check("剪贴板全局共享：另一个模型立即可粘贴", dstModel.canPaste)
+        dstModel.paste()
+        check("跨标签粘贴成功",
+              fm.fileExists(atPath: xferDst.appendingPathComponent("跨.txt").path))
+
+        srcModel.selectAll()
+        srcModel.cutSelection()
+        check("剪切标记跨模型可见",
+              dstModel.canPaste
+                  && dstModel.cutURLs.contains(where: {
+                      $0.standardizedFileURL == sharedFile.standardizedFileURL
+                  }))
+
+        // 拖文件到标签 chip = 切换到那个标签并把文件放入它的当前目录
+        let pairTabs = TabsModel(tabs: [srcModel, dstModel])
+        let secondFile = xferSrc.appendingPathComponent("再拖.txt")
+        fm.createFile(atPath: secondFile.path, contents: Data("d".utf8))
+        pairTabs.receiveDrop([secondFile], intoTabAt: 1, modifiers: [])
+        check("拖到标签后切换到那个标签", pairTabs.activeIndex == 1,
+              "实际 \(pairTabs.activeIndex)")
+        check("文件落入目标标签的当前目录",
+              fm.fileExists(atPath: xferDst.appendingPathComponent("再拖.txt").path))
+
+        // 拖到 + 号 = 新建标签并放入
+        let freshTabs = TabsModel(startAt: xferDst)
+        let thirdFile = xferSrc.appendingPathComponent("新标签.txt")
+        fm.createFile(atPath: thirdFile.path, contents: Data("e".utf8))
+        freshTabs.receiveDropOnPlus([thirdFile], modifiers: [])
+        check("拖到 + 号新建了标签", freshTabs.count == 2)
+        check("新标签里已有拖入的文件",
+              freshTabs.active.items.contains { $0.name == "新标签.txt" })
+
         check("本地化按当前语言取文案", L("甲", "A") == (L10n.isEnglish ? "A" : "甲"))
 
         let before = model.currentURL

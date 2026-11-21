@@ -64,3 +64,15 @@
 | **搜索容器** | 与地址栏同一套填充 / 描边 / 圆角 / 高度 / 聚焦环的搜索框外观；`NSSearchField` 只保留键盘行为 | `SearchBox` |
 | **焦点汇报** | 用 `becomeFirstResponder / resignFirstResponder` 而不是 `controlTextDidBeginEditing` —— 后者在只聚焦未打字时不触发 | `FocusReportingSearchField` |
 | **过滤保留** | 点列表空白不清搜索词；Esc 第一次清词、第二次退出搜索 | `SearchBox` |
+
+## 标签栏与独立窗口（v1.4.0）
+
+| 词 | 含义 | 对应代码 |
+|---|---|---|
+| **常驻标签栏** | 嵌在窗口工具栏中央（`.principal`）的标签 chips + `+`，单标签也显示 | `TabBarView` |
+| **全局剪贴板** | 应用级共享的 `ClipboardStore`：⌘C 在标签 A / 窗口 A，切到 B 直接 ⌘V | `ClipboardStore` |
+| **悬停切换** | 拖文件悬停在 chip 上 0.6s 自动切到那个标签，松手落入其当前目录 | `TabsModel.scheduleAutoSwitch` |
+| **拖到 + 号** | 新建一个标签（沿用当前目录）并直接放入拖入的文件 | `TabsModel.receiveDropOnPlus` |
+| **独立窗口** | 每窗口一份 `TabsModel`（窗口层 `@StateObject`），⌘N 开新窗口 | `WindowRootView` |
+| **聚焦窗口菜单** | 菜单命令作用于聚焦窗口的标签组，用 `@FocusedObject` 取 | `ExplorerCommands.tabs: TabsModel?` |
+| **全窗口截图** | `WINEXPLORER_SNAPSHOT_FULL=1` 抓含标题栏 / 工具栏的完整窗口（contentView 不含 chrome） | `SnapshotSupport.capture` |

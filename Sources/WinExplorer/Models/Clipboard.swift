@@ -25,3 +25,21 @@ struct FileClipboard {
         mode == .cut ? Set(urls) : []
     }
 }
+
+/// 应用级共享剪贴板。
+///
+/// Windows 的剪贴板本来就是全局的：⌘C 在一个文件夹窗口，切到另一个窗口直接 ⌘V。
+/// 标签页 / 独立窗口（adr/0006、0007）之间传文件走同一条路 —— 每个 BrowserModel
+/// 的 `clipboard` 属性都转发到这里；变化通过订阅广播回每个模型，
+/// 「剪切中变淡」在所有标签和窗口里同步刷新。
+final class ClipboardStore: ObservableObject {
+    static let shared = ClipboardStore()
+
+    @Published private(set) var item: FileClipboard?
+
+    private init() {}
+
+    func set(_ clipboard: FileClipboard?) {
+        item = clipboard
+    }
+}

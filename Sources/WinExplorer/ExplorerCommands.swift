@@ -2,12 +2,19 @@ import SwiftUI
 
 /// 菜单栏命令。快捷键和 Windows 习惯对齐：⌘[ / ⌘] 后退前进，⌘↑ 上一级。
 struct ExplorerCommands: Commands {
-    @ObservedObject var tabs: TabsModel
-
-    /// 菜单永远作用于当前标签
-    private var model: BrowserModel { tabs.active }
+    /// 聚焦窗口的标签组；没有聚焦窗口的极短暂间隙里菜单为空（adr/0007）
+    var tabs: TabsModel?
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
+        if let tabs {
+            groups(tabs, tabs.active)
+        }
+    }
+
+    /// 菜单永远作用于聚焦窗口的当前标签
+    @CommandsBuilder
+    private func groups(_ tabs: TabsModel, _ model: BrowserModel) -> some Commands {
         CommandGroup(replacing: .appInfo) {
             Button(L("关于 WinExplorer", "About WinExplorer")) {
                 model.showAbout()
@@ -38,6 +45,11 @@ struct ExplorerCommands: Commands {
         }
 
         CommandGroup(replacing: .newItem) {
+            Button(L("新建窗口", "New Window")) {
+                openWindow(id: "main")
+            }
+            .keyboardShortcut("n", modifiers: .command)
+
             Button(L("新建标签页", "New Tab")) {
                 tabs.newTab()
             }
