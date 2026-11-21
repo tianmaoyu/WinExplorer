@@ -116,6 +116,14 @@ enum SnapshotSupport {
                         active.showsFolderSizes = key.hasSuffix("on")
                         return
                     }
+                    if key.hasPrefix("new:") {
+                        // new:txt|md|csv|rtf|docx|xlsx|pptx，验证右键新建文件
+                        let ext = String(key.dropFirst("new:".count))
+                        if let kind = NewFileKind.allCases.first(where: { $0.fileExtension == ext }) {
+                            active.createFile(kind)
+                        }
+                        return
+                    }
                     if key.hasPrefix("archive:") {
                         // archive:zip / archive:unzip，验证压缩与解压（作用于当前选区）
                         switch String(key.dropFirst("archive:".count)) {

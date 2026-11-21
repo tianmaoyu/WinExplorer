@@ -2009,6 +2009,87 @@ final class BrowserModel: ObservableObject {
         }
     }
 
+    // MARK: - 新建文件（右键 → 新建）
+
+    /// 在当前目录创建一个新文件，重名自动编号，创建完直接进行内重命名。
+    /// 文本类初始为空；RTF 由 AppKit 生成；Office 三件套写入内嵌的最小空白包。
+    func createFile(_ kind: NewFileKind) {
+        let fm = FileManager.default
+        let base = kind.defaultBaseName
+        var name = "\(base).\(kind.fileExtension)"
+        var index = 2
+        var target = currentURL.appendingPathComponent(name)
+        while fm.fileExists(atPath: target.path) {
+            name = "\(base) \(index).\(kind.fileExtension)"
+            target = currentURL.appendingPathComponent(name)
+            index += 1
+        }
+
+        guard let content = DocumentTemplates.content(for: kind) else {
+            errorMessage = L(
+                "新建文件失败：没有「\(kind.displayName)」的模板",
+                "Couldn’t create the file: no template for \(kind.displayName)"
+            )
+            return
+        }
+
+        do {
+            try content.write(to: target, options: .atomic)
+            let createdSize = content.count
+            registerUndo(UndoEntry(
+                title: L("新建「\(name)」", "Create “\(name)”"),
+                undo: { [weak self] in
+                    // 文件被编辑过（大小变了）就不撤，绝不丢用户写进去的内容
+                    let current = (try? fm.attributesOfItem(atPath: target.path))?[.size] as? Int ?? 0
+                    if current == createdSize {
+                        try? fm.removeItem(at: target)
+                    } else {
+                        self?.errorMessage = L(
+                            "「\(name)」已经被编辑过，没有撤销",
+                            "“\(name)” has been edited, so it can’t be undone"
+                        )
+                    }
+                },
+                redo: { [weak self] in
+                    do {
+                        try content.write(to: target, options: .atomic)
+                        self?.focus(url: target.standardizedFileURL, scroll: false)
+                    } catch {
+                        self?.errorMessage = L(
+                            "重做新建失败：\(error.localizedDescription)",
+                            "Couldn’t redo creating the file: \(error.localizedDescription)"
+                        )
+                    }
+                }
+            ))
+            reload()
+            focus(url: target.standardizedFileURL, scroll: false)
+            showFlash(L("已新建「\(name)」", "Created “\(name)”"))
+            // 和 Windows 一致：新建完立刻改名字
+            if let item = items.first(where: {
+                $0.url.standardizedFileURL == target.standardizedFileURL
+            }) {
+                beginRename(item: item)
+            }
+        } catch {
+            errorMessage = L(
+                "新建文件失败：\(error.localizedDescription)",
+                "Couldn’t create the file: \(error.localizedDescription)"
+            )
+        }
+    }
+
+    // MARK: - 在终端中打开
+
+    /// 把文件夹交给终端应用开新窗口。`directory` 为 nil 时用当前目录。
+    func openInTerminal(_ directory: URL?, app: TerminalService.App) {
+        let target = directory ?? currentURL
+        let didStart = TerminalService.open(target, app: app)
+        if didStart {
+            showFlash(L("已在 \(app.name) 中打开", "Opened in \(app.name)"))
+        }
+    }
+
     func showFlash(_ message: String) {
         flash = message
         flashWorkItem?.cancel()

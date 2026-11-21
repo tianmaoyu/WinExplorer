@@ -372,6 +372,13 @@ struct FileListView: View {
             Button(L("添加到收藏夹", "Add to Favorites")) {
                 model.addToFavorites(item)
             }
+            Menu(L("在终端中打开", "Open in Terminal")) {
+                ForEach(TerminalService.available) { app in
+                    Button(app.name) {
+                        model.openInTerminal(item.url, app: app)
+                    }
+                }
+            }
         }
         Divider()
         Button(L("剪切", "Cut")) {
@@ -444,8 +451,29 @@ struct FileListView: View {
     /// 空白区域右键菜单（Windows 在文件夹空白处右键的效果）
     @ViewBuilder
     private var emptyAreaMenu: some View {
-        Button(L("新建文件夹", "New Folder")) {
-            model.createFolder()
+        Menu(L("新建", "New")) {
+            Button(L("文件夹", "Folder")) {
+                model.createFolder()
+            }
+            Divider()
+            ForEach(NewFileKind.allCases) { kind in
+                Button {
+                    model.createFile(kind)
+                } label: {
+                    Label(kind.displayName, systemImage: kind.symbolName)
+                }
+            }
+        }
+        Menu(L("在终端中打开", "Open in Terminal")) {
+            if TerminalService.available.isEmpty {
+                Text(L("没有找到终端应用", "No terminal app found"))
+            } else {
+                ForEach(TerminalService.available) { app in
+                    Button(app.name) {
+                        model.openInTerminal(nil, app: app)
+                    }
+                }
+            }
         }
         Button(L("搜索当前文件夹…", "Search This Folder…")) {
             model.beginSearch()

@@ -2,7 +2,7 @@
 
 macOS 上的「Windows 资源管理器」式文件浏览器，SwiftUI + Swift 原生实现，无 Xcode 工程、无第三方依赖。
 
-当前版本：**1.2.1**（后台统计不再进入 macOS 隐私保护位置），窗口尺寸 1060×680，启动后回到上次浏览的目录。路线图（26 项 + 权限展示）已全部落地。
+当前版本：**1.3.0**（右键新建常用文件 + 在终端中打开），窗口尺寸 1060×680，启动后回到上次浏览的目录。路线图（30 项）已全部落地。
 本阶段的重点是把「文件夹操作」做扎实，应用包（`.app`）一律按普通文件处理，不做应用专属逻辑。
 
 ## 已实现
@@ -53,6 +53,8 @@ macOS 上的「Windows 资源管理器」式文件浏览器，SwiftUI + Swift �
 | **中英双语** | 界面文案跟随系统语言，`-AppleLanguages "(en)"` 可整套切英文；菜单、工具栏、侧边栏、右键菜单、状态栏、各个面板全部覆盖 |
 | **未授权项** | 系统不给读的文件 / 文件夹**照常列出**，但整行变淡（42% 不透明度）、图标换成淡符号 + 橙色锁徽标，大小显示 `—`；悬停提示「未授权：需要授权后才能打开」；状态栏显示「N 项未授权」。**列目录永远不会为子项弹授权框** |
 | **授权交互** | 只有主动打开 / 预览 / 复制 / 剪切 / 删除 / 压缩未授权项，或主动进入打不开的目录时，才弹出窗口内浮层：说明是哪一项、为什么、以及「在 Finder 中显示」「选择此项目以授权…」（`NSOpenPanel` 预选该项）。授权成功即刷新，锁与淡化消失；仍失败会说明是文件权限位问题并引导去 Finder 改。桌面 / 文稿 / 下载 / 外置卷会额外给「打开系统设置」 |
+| **右键新建** | 空白处右键「新建」子菜单：文件夹、文本文档（txt）、Markdown、CSV、RTF、Word 文档（docx）、Excel 工作表（xlsx）、PowerPoint 演示文稿（pptx）；重名自动编号、建完进行内重命名（只选中主名）、⌘Z 可撤销。Office 三件套是内嵌的 ECMA-376 最小空白包（见 `docs/adr/0004`），Word / Excel / PowerPoint / WPS 都能打开 |
+| **在终端中打开** | 空白处与文件夹项右键「在终端中打开」子菜单：iTerm / Warp（装了才显示）+ 系统 Terminal。走 LaunchServices 转交，**不跑 AppleScript、零授权弹框**；终端收到文件夹 URL 自己开新窗口并 cd |
 | 新建文件夹 | 重名自动编号「新建文件夹 2」，建完自动选中 |
 | 隐藏文件开关 | 默认隐藏 `.` 开头的文件和系统隐藏项 |
 | 右键菜单 | 打开 / 在 Finder 中显示 / 剪切 / 复制 / 粘贴到此处（文件夹）/ 复制路径 / 重命名 / 删除 / 刷新 |
@@ -116,11 +118,11 @@ App 用 ad-hoc 签名（`codesign -s -`）。首次访问桌面/文稿会弹一�
 
 | 环境变量 | 作用 |
 |---|---|
-| `WINEXPLORER_SELFTEST=1` | 在临时目录跑 281 项逻辑自检（读取、排序、多选、键盘焦点、导航、新建、重命名、删除、剪贴板、拖放、撤销重做、地址栏、搜索、属性面板、自动刷新、标签页、收藏夹、批量重命名、压缩解压、文件夹大小、位置分区、关于面板、权限状态与授权拦截、受保护位置与跳过统计、QuickLook 预览列表、错误处理），打印 PASS/FAIL 后退出 |
+| `WINEXPLORER_SELFTEST=1` | 在临时目录跑 306 项逻辑自检（读取、排序、多选、键盘焦点、导航、新建、重命名、删除、剪贴板、拖放、撤销重做、地址栏、搜索、属性面板、自动刷新、标签页、收藏夹、批量重命名、压缩解压、文件夹大小、位置分区、关于面板、权限状态与授权拦截、受保护位置与跳过统计、右键新建文件与终端转交、QuickLook 预览列表、错误处理），打印 PASS/FAIL 后退出 |
 | `WINEXPLORER_START=/path` | 启动即打开指定目录，便于截图验收 |
 | `WINEXPLORER_SNAPSHOT=/tmp/x.png` | 窗口渲染完成后自截图再退出（用于无「屏幕录制」权限的环境） |
 | `WINEXPLORER_SNAPSHOT_DELAY=0.5` | 覆盖截图前的等待秒数，用来抓复制进度这类瞬时状态 |
-| `WINEXPLORER_KEYS=down,down,cmd+a` | 截图前先向窗口发按键，走真实响应链验证键盘；`menu:cmd+a` 走菜单派发，`fn+a` 复现 Command 被重映射的情况，`nav:/某个/路径` 跳目录，`sel:片段` 选中名字含该片段的所有项，`drop:/某个/路径` 点亮某个落点，`drag:/某个/路径` 模拟一次拖拽，`type:文本` 往当前焦点输入框里打字，`touch:文件名` 在当前目录造一个文件，`preview:/路径` 直接预览某个文件，`tab:new|close|next|prev` 操作标签页，`favorite:add|clear` 操作收藏夹，`rename:batch[:基名]` 打开批量重命名面板，`archive:zip|unzip|unzip-here` 压缩 / 解压当前选区，`sizes:on|off` 切换文件夹大小，`about` 打开关于面板，`open:名称` 选中并打开某项（用来看未授权项的授权浮层），`info:名称` 选中并打开属性面板；**截图模式一律不写用户偏好**（`Preferences.enabled = false`），验收动作不会把开关永久打开 |
+| `WINEXPLORER_KEYS=down,down,cmd+a` | 截图前先向窗口发按键，走真实响应链验证键盘；`menu:cmd+a` 走菜单派发，`fn+a` 复现 Command 被重映射的情况，`nav:/某个/路径` 跳目录，`sel:片段` 选中名字含该片段的所有项，`drop:/某个/路径` 点亮某个落点，`drag:/某个/路径` 模拟一次拖拽，`type:文本` 往当前焦点输入框里打字，`touch:文件名` 在当前目录造一个文件，`preview:/路径` 直接预览某个文件，`tab:new|close|next|prev` 操作标签页，`favorite:add|clear` 操作收藏夹，`rename:batch[:基名]` 打开批量重命名面板，`archive:zip|unzip|unzip-here` 压缩 / 解压当前选区，`sizes:on|off` 切换文件夹大小，`about` 打开关于面板，`open:名称` 选中并打开某项（用来看未授权项的授权浮层），`info:名称` 选中并打开属性面板，`new:txt|docx|…` 按扩展名新建文件；**截图模式一律不写用户偏好**（`Preferences.enabled = false`），验收动作不会把开关永久打开 |
 | `WINEXPLORER_APPEARANCE=dark|light` | 强制外观，用于深浅色两套截图验收（默认跟随系统） |
 | `WINEXPLORER_LANG=zh|en` | 强制界面语言（默认跟随系统）；想看完整英文界面（含系统提供的类型名）请用 `-AppleLanguages "(en)"` 启动 |
 | `WINEXPLORER_DRAG_DRYRUN=1` | 配合 `drag:` 使用：只打印"这次会拖哪些文件"，不真的进入模态拖拽会话 |
@@ -129,7 +131,7 @@ App 用 ad-hoc 签名（`codesign -s -`）。首次访问桌面/文稿会弹一�
 WINEXPLORER_SELFTEST=1 ./build/WinExplorer.app/Contents/MacOS/WinExplorer
 ```
 
-最近一次自检结果：281/281 PASS（zh / en 两种语言各跑一遍都通过）。所有用例都在临时目录内，自检期间不写系统剪贴板、不写用户偏好、不开目录监听、不注册系统快捷键。
+最近一次自检结果：306/306 PASS（zh / en 两种语言各跑一遍都通过）。所有用例都在临时目录内，自检期间不写系统剪贴板、不写用户偏好、不开目录监听、不注册系统快捷键。
 
 ## 代码结构
 
@@ -156,6 +158,8 @@ Sources/WinExplorer/
 │   ├── L10n.swift              # 中英双语（跟随系统语言，可用环境变量强制）
 │   ├── PermissionService.swift # 只读权限探测、权限错误识别、授权面板与系统设置入口
 │   ├── ProtectedPaths.swift    # TCC 保护位置判定（后台递归跳过 / 图标规避，纯字符串比较）
+│   ├── DocumentTemplates.swift # 右键新建的初始内容（内嵌最小 OOXML 模板 + RTF 生成）
+│   ├── TerminalService.swift   # 「在终端中打开」的终端探测与 LaunchServices 转交
 │   ├── DragSupport.swift       # 行探针命中 + AppKit 拖拽会话 + onDrop 解析
 │   ├── DirectoryWatcher.swift  # vnode 事件源 + 防抖，外部改动自动刷新
 │   ├── FileInfoService.swift   # 属性数据 + 文件夹递归统计
@@ -199,6 +203,8 @@ Sources/WinExplorer/
 - 解压到当前文件夹遇到同名项目会整批拒绝，不做「全部替换 / 跳过」的选择对话框
 - 批量重命名的查找替换是字面量替换，不支持正则与编号通配符
 - 地址栏只接受绝对路径和 `~`，不解析相对路径，也没有历史下拉
+- Office 模板是「最小空白包」：Word 打开是一张空页、Excel 是空 Sheet1、PowerPoint 是一张空幻灯片；要表头/封面请存成自己的模板再复制。没做 Pages / Numbers / Keynote（私有格式无法生成最小文件）
+- 「在终端中打开」只探测 Terminal / iTerm / Warp 三个；终端列表是数据驱动，要加 kitty、Alacritty 等改 `TerminalService.available` 即可
 - 「计算文件夹大小」对受保护位置一律跳过：在家目录里看不到「音乐 / 影片 / 图片 / 桌面 / 文稿 / 下载」的体积，在 iCloud 云盘里也看不到子目录体积。这是为了避免系统授权弹框，不是算不出来；用户主动进入目录后浏览功能完全正常
 - 首次**主动进入**桌面 / 文稿 / 下载 / 外置卷时，系统自己仍会弹一次 TCC 授权框 —— 那是系统行为，应用无法预先知道授权结果或阻止它
 - 权限这一层是"只读探测 + 显式确认"，不是沙盒授权：本 App 非沙盒（要浏览任意路径），所以「选择此项目以授权」**不能**改变文件本身的 POSIX 权限位，也不能替代 macOS 的隐私（TCC）授权；TCC 受保护的位置需要在系统设置里放开

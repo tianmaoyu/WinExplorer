@@ -1247,6 +1247,71 @@ enum SelfTest {
                   && ProtectedPaths.skipReason == L("受 macOS 隐私保护，跳过自动统计",
                                                     "Protected by macOS — automatic scanning skipped"))
 
+        // MARK: 右键新建文件（文本 + 常用办公文件）与「在终端中打开」
+        let newRoot = root.appendingPathComponent("newfiles")
+        try? fm.createDirectory(at: newRoot, withIntermediateDirectories: true)
+        let newModel = BrowserModel(startAt: newRoot)
+
+        for kind in NewFileKind.allCases {
+            check("模板内容齐全：\(kind.displayName)",
+                  DocumentTemplates.content(for: kind) != nil)
+        }
+        check("docx 模板是 zip 包",
+              DocumentTemplates.content(for: .word)?.prefix(2) == Data("PK".utf8))
+        check("xlsx 模板是 zip 包",
+              DocumentTemplates.content(for: .excel)?.prefix(2) == Data("PK".utf8))
+        check("pptx 模板是 zip 包",
+              DocumentTemplates.content(for: .powerpoint)?.prefix(2) == Data("PK".utf8))
+        check("txt 初始为空",
+              DocumentTemplates.content(for: .text)?.isEmpty == true)
+        check("rtf 有 RTF 头",
+              String(data: DocumentTemplates.content(for: .rtf) ?? Data(), encoding: .ascii)?
+                  .hasPrefix("{\\rtf1") == true)
+
+        newModel.createFile(.text)
+        let textName = "\(L("新建文本文档", "New Text Document")).txt"
+        check("文本文档已创建", fm.fileExists(atPath: newRoot.appendingPathComponent(textName).path))
+        check("创建后自动进行内重命名",
+              newModel.renamingURL?.lastPathComponent == textName,
+              "实际 \(newModel.renamingURL?.lastPathComponent ?? "nil")")
+        newModel.cancelRename()
+
+        newModel.createFile(.text)
+        let secondName = "\(L("新建文本文档", "New Text Document")) 2.txt"
+        check("重名自动编号", fm.fileExists(atPath: newRoot.appendingPathComponent(secondName).path))
+        newModel.cancelRename()
+
+        newModel.createFile(.word)
+        let wordName = "\(L("新建 Word 文档", "New Word Document")).docx"
+        let wordURL = newRoot.appendingPathComponent(wordName)
+        check("Word 文档已创建", fm.fileExists(atPath: wordURL.path))
+        check("Word 文档写入的是模板（非空）",
+              ((try? fm.attributesOfItem(atPath: wordURL.path))?[.size] as? Int) ?? 0 > 0)
+        check("撤销记录是新建",
+              newModel.canUndo && (newModel.undoTitle?.contains(L("新建", "Create")) ?? false),
+              "实际 \(newModel.undoTitle ?? "nil")")
+        newModel.undo()
+        check("撤销后新文件被删除", !fm.fileExists(atPath: wordURL.path))
+        newModel.redo()
+        check("重做后文件恢复", fm.fileExists(atPath: wordURL.path))
+
+        newModel.createFile(.excel)
+        newModel.cancelRename()
+        let excelName = "\(L("新建 Excel 工作表", "New Excel Worksheet")).xlsx"
+        let excelURL = newRoot.appendingPathComponent(excelName)
+        try? Data("user content".utf8).write(to: excelURL)
+        newModel.undo()
+        check("被编辑过的文件撤销时不删除", fm.fileExists(atPath: excelURL.path))
+
+        check("至少找到一个终端应用", !TerminalService.available.isEmpty)
+        check("系统 Terminal 在可用列表里",
+              TerminalService.available.contains { $0.name == "Terminal" })
+        if let terminal = TerminalService.available.first {
+            let handOff = TerminalService.handOffDescription(directory: newRoot, app: terminal)
+            check("终端转交命令包含目标目录", handOff.contains(newRoot.standardizedFileURL.path))
+            check("dry-run 不启动终端", TerminalService.open(newRoot, app: terminal, dryRun: true))
+        }
+
         check("本地化按当前语言取文案", L("甲", "A") == (L10n.isEnglish ? "A" : "甲"))
 
         let before = model.currentURL

@@ -45,3 +45,12 @@
 | **跳过统计** | 对受保护位置不启动枚举，返回 `skipped`；大小显示 `—`（不是 `0 B`），结果不进缓存 | `Size.skipped` / `FolderStats.skipped` |
 | **主动浏览** | 用户双击进入目录、正常列出这一层。**不受保护规则限制**，仍可复制 / 重命名 / 删除 | `BrowserModel.load` |
 | **图标规避** | 比「跳过统计」更窄：只对媒体资料库包与 `~/音乐/Music` 内部项避开 `NSWorkspace.icon(forFile:)`；可读的受保护目录保持系统真实图标 | `ProtectedPaths.shouldAvoidSystemIcon` |
+
+## 右键新建与终端（v1.3.0）
+
+| 词 | 含义 | 对应代码 |
+|---|---|---|
+| **新建模板** | 每种「新建」类型的初始内容：文本类为空、RTF 由 AppKit 生成、Office 三件套是内嵌 base64 的 ECMA-376 最小空白包 | `DocumentTemplates` |
+| **新建类型** | `NewFileKind`：txt / md / csv / rtf / docx / xlsx / pptx，带默认名、扩展名与菜单图标 | `NewFileKind` |
+| **编号命名** | 重名时 `基名 2.扩展名` 递增，与 Windows 一致 | `BrowserModel.createFile` |
+| **终端转交** | 把文件夹 URL 交给终端应用（LaunchServices），终端自己开新窗口并 cd；不用 AppleScript，避免自动化授权弹框 | `TerminalService` |
