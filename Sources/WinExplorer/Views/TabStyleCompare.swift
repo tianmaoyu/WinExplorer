@@ -66,7 +66,8 @@ struct TabStyleCompareView: View {
                 plus
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            // 只设高度即可生效：chip 填满条带高度（底部贴齐），宽度/形状自适应
+            .frame(height: 52)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(nsColor: .underPageBackgroundColor))
             .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -94,7 +95,8 @@ struct TabStyleCompareView: View {
                 .opacity(active ? 1 : 0)
         }
         .padding(.horizontal, TabCardShape.horizontalPadding(for: style))
-        .padding(.vertical, 4)
+        // 高度占满条带（高度由容器给定），底部贴齐
+        .frame(maxHeight: .infinity)
         .background {
             TabCardShape(style: style)
                 .fill(active ? Color(nsColor: .textBackgroundColor) : Color.clear)

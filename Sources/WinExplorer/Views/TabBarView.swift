@@ -12,6 +12,9 @@ import UniformTypeIdentifiers
 struct TabBarView: View {
     @ObservedObject var tabs: TabsModel
     static let height: CGFloat = 34
+    /// 梯形模式下标签条的总高（= 工具栏 item 的可用高度）。
+    /// 唯一需要设置的尺寸：chip 高度、顶部呼吸、形状圆角/外撇全部由它派生
+    static let trapezoidBarHeight: CGFloat = 52
 
     @State private var draggingID: UUID?
     /// 文件拖拽悬停的标签（蓝色描边反馈）
@@ -19,6 +22,20 @@ struct TabBarView: View {
     @State private var plusTargeted = false
 
     var body: some View {
+        if TabCardStyle.current == .trapezoid {
+            // 只设一个高度即可生效：顶部呼吸量按比例派生，chip 填满剩余高度、
+            // 底部贴齐，宽度 / 斜边 / 形状比例全部自适应（adr/0009 修订）。
+            // 注意不能依赖容器提案高度 —— 工具栏 item 连高度也只给理想值，
+            // 必须自己把总高定下来，chip 内部的 maxHeight(.infinity) 才吃得满。
+            bar
+                .padding(.top, Self.trapezoidBarHeight * 0.1)
+                .frame(height: Self.trapezoidBarHeight)
+        } else {
+            bar.frame(height: Self.height)
+        }
+    }
+
+    private var bar: some View {
         HStack(spacing: 2) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
@@ -32,7 +49,6 @@ struct TabBarView: View {
             plusButton
                 .padding(.trailing, 6)
         }
-        .frame(height: Self.height)
     }
 
     private func chip(tab: BrowserModel, index: Int) -> some View {
@@ -138,7 +154,9 @@ private struct TabChip: View {
             }
         }
         .padding(.horizontal, TabCardShape.horizontalPadding(for: .current))
-        .padding(.vertical, 4)
+        // 高度占满可用区域（容器给多少吃多少，不被压缩）：形状 rect = 卡片全高，
+        // 底部脚贴齐容器底边 —— Win11 标签正是整条标签带高度、下方贴齐（adr/0009）
+        .frame(maxHeight: .infinity)
         .background {
             TabCardShape()
                 .fill(background)
@@ -190,6 +208,13 @@ enum TabCardStyle {
 
 /// 标签卡轮廓：圆角矩形或 Win11 梯形切角。
 ///
+/// 尺寸契约（adr/0009 修订）：
+/// - **只由高度驱动**：所有圆角 / 凹圆角 / 外撇都按 `rect.height` 的固定比例
+///   派生，任何尺寸下形状比例不变，不需要额外的宽度或尺寸参数；
+/// - **宽度随容器**：竖边位置由宽度减去外撇量得出，窄容器自动收窄；
+/// - **底部贴齐**：形状填满 rect 全高，底部脚落在 rect 底边上（高度占满可用
+///   区域，特别是下方），高度不会被压缩。
+///
 /// Win11 的标签形状（`trapezoid`）：上边两个圆角，左右侧边垂直，
 /// 到底部向外撇出一个脚，衔接处是一段**凹**圆角 —— 切点处切线分别
 /// 与竖边、底边相切，正是 Win11 TabView 的 profile。
@@ -202,23 +227,30 @@ struct TabCardShape: Shape {
         style == .trapezoid ? 15 : 8
     }
 
-    /// 上方圆角
-    private let topRadius: CGFloat = 6
-    /// 底部凹圆角半径（控制外撇的缓急）
-    private let fillet: CGFloat = 7
-    /// 底部外撇量（脚比竖边宽出多少）
-    private let splay: CGFloat = 9
+    // 高度比例（来自 Win11 截图实测：顶圆角 ≈ 0.19h）——形状不变形的关键
+    private static let topRadiusRatio: CGFloat = 0.18
+    private static let filletRatio: CGFloat = 0.20
+    private static let splayRatio: CGFloat = 0.18
 
     func path(in rect: CGRect) -> Path {
+        let h = rect.height
         switch style {
         case .card:
-            return RoundedRectangle(cornerRadius: 6).path(in: rect)
+            return RoundedRectangle(
+                cornerRadius: h * Self.topRadiusRatio, style: .continuous
+            ).path(in: rect)
         case .trapezoid:
             return trapezoidPath(in: rect)
         }
     }
 
     private func trapezoidPath(in rect: CGRect) -> Path {
+        let h = rect.height
+        let topRadius = h * Self.topRadiusRatio
+        let fillet = h * Self.filletRatio
+        // 外撇量同样按高度派生；窄容器时收窄，保证形状不自交
+        let splay = min(h * Self.splayRatio, max(0, rect.width * 0.5 - topRadius))
+
         let minX = rect.minX, maxX = rect.maxX
         let minY = rect.minY, maxY = rect.maxY
         let left = minX + splay          // 左侧竖边
@@ -241,7 +273,7 @@ struct TabCardShape: Shape {
             to: CGPoint(x: maxX, y: maxY),
             control: CGPoint(x: right, y: maxY)
         )
-        // 底边
+        // 底边（贴齐容器底）
         p.addLine(to: CGPoint(x: minX, y: maxY))
         // 左脚凹圆角收回竖边
         p.addQuadCurve(
