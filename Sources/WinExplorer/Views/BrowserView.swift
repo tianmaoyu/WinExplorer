@@ -356,31 +356,12 @@ struct BrowserView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        // 标签栏在工具栏中央，常驻显示 —— Windows 11 的形态（adr/0006）：
-        // 标签 chip + 「+」永远可见，拖文件到 chip / + 也能传文件
-        ToolbarItem(placement: .principal) {
+        // 标签栏常驻工具栏最左侧 —— Win11 资源管理器的形态（adr/0008 修订 adr/0006）：
+        // 标签 chip + 「+」永远可见，拖文件到 chip / + 也能传文件。
+        // 后退/前进/上一级按钮已移除，导航走「前往」菜单（⌘[ / ⌘] / ⌘↑）。
+        ToolbarItemGroup(placement: .navigation) {
             TabBarView(tabs: tabs)
                 .frame(maxWidth: 520)
-        }
-
-        ToolbarItemGroup(placement: .navigation) {
-            Button(action: model.goBack) {
-                Image(systemName: "chevron.left")
-            }
-            .disabled(!model.canGoBack)
-            .help(L("后退（⌘[）", "Back (⌘[)"))
-
-            Button(action: model.goForward) {
-                Image(systemName: "chevron.right")
-            }
-            .disabled(!model.canGoForward)
-            .help(L("前进（⌘]）", "Forward (⌘])"))
-
-            Button(action: model.goUp) {
-                Image(systemName: "arrow.up")
-            }
-            .disabled(!model.canGoUp)
-            .help(L("上一级（⌘↑）", "Enclosing folder (⌘↑)"))
         }
 
         ToolbarItemGroup(placement: .primaryAction) {

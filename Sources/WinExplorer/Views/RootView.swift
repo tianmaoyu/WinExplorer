@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// 窗口根视图：当前标签的浏览器。标签栏在窗口工具栏中央（adr/0006）。
+/// 窗口根视图：当前标签的浏览器。标签栏在窗口工具栏最左侧（adr/0008）。
 /// 单独拆一层是为了让「切换标签」能换掉 BrowserView 观察的 model。
 struct RootView: View {
     @ObservedObject var tabs: TabsModel

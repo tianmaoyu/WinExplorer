@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// 标签栏（Windows 11 资源管理器那种），常驻显示并嵌入窗口工具栏中央：
+/// 标签栏（Windows 11 资源管理器那种），常驻显示并嵌入窗口工具栏最左侧：
 /// 标签 chip + `+`（新建标签）永远可见，单标签也不例外。
 ///
 /// 两种拖拽共用 chips：

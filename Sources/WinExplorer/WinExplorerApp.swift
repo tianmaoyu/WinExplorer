@@ -23,6 +23,8 @@ struct WinExplorerApp: App {
                 .frame(minWidth: 840, minHeight: 500)
         }
         .defaultSize(width: 1060, height: 680)
+        // Win11 形态：工具栏里不显示窗口标题（adr/0008）
+        .windowToolbarStyle(.unified(showsTitle: false))
         .commands {
             ExplorerCommands(tabs: focusedTabs)
         }
