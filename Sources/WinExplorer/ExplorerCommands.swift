@@ -2,7 +2,10 @@ import SwiftUI
 
 /// 菜单栏命令。快捷键和 Windows 习惯对齐：⌘[ / ⌘] 后退前进，⌘↑ 上一级。
 struct ExplorerCommands: Commands {
-    @ObservedObject var model: BrowserModel
+    @ObservedObject var tabs: TabsModel
+
+    /// 菜单永远作用于当前标签
+    private var model: BrowserModel { tabs.active }
 
     var body: some Commands {
         CommandGroup(replacing: .undoRedo) {
@@ -29,6 +32,19 @@ struct ExplorerCommands: Commands {
         }
 
         CommandGroup(replacing: .newItem) {
+            Button("新建标签页") {
+                tabs.newTab()
+            }
+            .keyboardShortcut("t", modifiers: .command)
+
+            Button("关闭标签页") {
+                tabs.closeActiveTab()
+            }
+            .keyboardShortcut("w", modifiers: .command)
+            .disabled(tabs.count == 1)
+
+            Divider()
+
             Button("新建文件夹") {
                 model.createFolder()
             }
@@ -44,6 +60,12 @@ struct ExplorerCommands: Commands {
                 model.showInfo()
             }
             .keyboardShortcut("i", modifiers: .command)
+            .disabled(!model.hasSelection)
+
+            Button("快速预览") {
+                model.toggleQuickLook()
+            }
+            .keyboardShortcut(.space, modifiers: [])
             .disabled(!model.hasSelection)
 
             Button("重命名…") {
@@ -134,8 +156,11 @@ struct ExplorerCommands: Commands {
             .keyboardShortcut("0", modifiers: .command)
             .disabled(model.viewMode != .details)
 
-            Toggle("显示隐藏文件", isOn: $model.showHidden)
-                .keyboardShortcut(".", modifiers: [.command, .shift])
+            Toggle("显示隐藏文件", isOn: Binding(
+                get: { model.showHidden },
+                set: { model.showHidden = $0 }
+            ))
+            .keyboardShortcut(".", modifiers: [.command, .shift])
         }
 
         CommandMenu("前往") {
@@ -148,6 +173,25 @@ struct ExplorerCommands: Commands {
                 model.beginSearch()
             }
             .keyboardShortcut("f", modifiers: .command)
+
+            Divider()
+
+            Button("下一个标签页") {
+                tabs.selectNext(true)
+            }
+            .keyboardShortcut(.tab, modifiers: .control)
+            .disabled(tabs.count == 1)
+
+            Button("上一个标签页") {
+                tabs.selectNext(false)
+            }
+            .keyboardShortcut(.tab, modifiers: [.control, .shift])
+            .disabled(tabs.count == 1)
+
+            Button("添加到收藏夹") {
+                model.addCurrentDirectoryToFavorites()
+            }
+            .disabled(model.isCurrentDirectoryFavorite)
 
             Divider()
 

@@ -1,4 +1,5 @@
 import AppKit
+import Quartz
 import SwiftUI
 
 /// 持有当前窗口的"键盘响应视图"，点击后可以把它重新设为第一响应者，
@@ -72,6 +73,24 @@ struct KeyCaptureView: NSViewRepresentable {
         override func keyDown(with event: NSEvent) {
             if onKey?(event) == true { return }
             super.keyDown(with: event)
+        }
+
+        // MARK: - Quick Look 控制权
+
+        // QLPreviewPanel 显示时会沿响应链寻找实现了这三个方法的对象；
+        // 这个视图常驻第一响应者，正好把面板交给 QuickLookController。
+        override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool {
+            true
+        }
+
+        override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
+            panel.dataSource = QuickLookController.shared
+            panel.delegate = QuickLookController.shared
+        }
+
+        override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {
+            panel.dataSource = nil
+            panel.delegate = nil
         }
 
         deinit {

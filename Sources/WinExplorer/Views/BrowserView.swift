@@ -2,6 +2,8 @@ import SwiftUI
 
 struct BrowserView: View {
     @ObservedObject var model: BrowserModel
+    /// 标签容器（只用来执行新建/关闭/切换，不在这里观察它的变化）
+    let tabs: TabsModel
 
     var body: some View {
         NavigationSplitView {
@@ -13,7 +15,7 @@ struct BrowserView: View {
         .navigationSplitViewStyle(.balanced)
         .toolbar { toolbarContent }
         .onAppear {
-            SnapshotSupport.scheduleIfNeeded(model: model)
+            SnapshotSupport.scheduleIfNeeded(model: model, tabs: tabs)
             installDragSource()
             ShortcutMonitor.shared.install(
                 isBlocked: { model.hasModalOverlay },
@@ -22,6 +24,7 @@ struct BrowserView: View {
                 onShortcut: { event in
                     // SwiftUI 会在菜单层把这些组合吃掉且不调用 action（和 ⌘Z 同一个坑），
                     // 只能在 sendEvent 之前接管。
+                    let flags = event.modifierFlags
                     switch event.keyCode {
                     case 34: // I = 显示简介 / 再按一次关闭
                         if model.info != nil {
@@ -32,6 +35,18 @@ struct BrowserView: View {
                         return true
                     case 3: // F = 搜索当前目录
                         if !model.hasModalOverlay { model.beginSearch() }
+                        return true
+                    case 17 where flags.contains(.command): // T = 新建标签页
+                        if !model.hasModalOverlay { tabs.newTab() }
+                        return true
+                    case 13 where flags.contains(.command): // W = 关闭标签页
+                        // 只剩一个标签时放行，让系统的「关闭窗口」生效
+                        guard tabs.count > 1, !model.hasModalOverlay else { return false }
+                        tabs.closeActiveTab()
+                        return true
+                    case 48 where flags.contains(.control): // ⌃Tab / ⌃⇧Tab 切换标签
+                        guard !model.hasModalOverlay else { return true }
+                        tabs.selectNext(!flags.contains(.shift))
                         return true
                     default:
                         return false
@@ -278,6 +293,8 @@ struct BrowserView: View {
             model.focusEdge(first: false)
         case 36, 76: // Return / 小键盘 Enter
             model.openSelection()
+        case 49: // 空格 = 快速预览
+            model.toggleQuickLook()
         case 53: // Esc
             if model.isSearching {
                 // 先退出搜索，再按一次才是清空选择

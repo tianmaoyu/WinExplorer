@@ -718,6 +718,81 @@ enum SelfTest {
 
         model.searchText = ""
 
+        // MARK: 标签页
+
+        let tabA = BrowserModel(startAt: featureRoot)
+        let tabB = BrowserModel(startAt: nested)
+        let tabModel = TabsModel(tabs: [tabA, tabB])
+        check("标签页数量", tabModel.count == 2, "实际 \(tabModel.count)")
+        check("默认激活第一个标签", tabModel.active === tabA)
+        tabModel.select(1)
+        check("切换标签后 active 跟着变", tabModel.active === tabB)
+        check("各标签目录互不影响",
+              tabA.currentURL.standardizedFileURL.path == featureRoot.standardizedFileURL.path
+                && tabB.currentURL.standardizedFileURL.path == nested.standardizedFileURL.path)
+
+        let createdTab = tabModel.newTab()
+        check("新建标签插在当前标签之后", tabModel.count == 3 && tabModel.activeIndex == 2,
+              "count=\(tabModel.count) index=\(tabModel.activeIndex)")
+        check("新标签沿用当前目录",
+              createdTab.currentURL.standardizedFileURL.path == nested.standardizedFileURL.path)
+
+        tabModel.closeTab(at: 2)
+        check("关闭标签后数量减少且激活前一个", tabModel.count == 2 && tabModel.activeIndex == 1,
+              "count=\(tabModel.count) index=\(tabModel.activeIndex)")
+
+        tabModel.selectNext(true)
+        check("⌃Tab 循环到第一个", tabModel.activeIndex == 0, "实际 \(tabModel.activeIndex)")
+        tabModel.selectNext(false)
+        check("⌃⇧Tab 回到最后一个", tabModel.activeIndex == 1, "实际 \(tabModel.activeIndex)")
+
+        tabModel.moveTab(from: 0, to: 2)
+        check("标签排序后数量不变", tabModel.count == 2)
+        check("标签排序后激活的还是同一个", tabModel.active === tabB)
+
+        let singleTab = TabsModel(tabs: [BrowserModel(startAt: featureRoot)])
+        singleTab.closeActiveTab()
+        check("最后一个标签不会被关掉", singleTab.count == 1)
+        check("关闭最后一个标签回到个人文件夹",
+              singleTab.active.currentURL.standardizedFileURL.path
+                == FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path)
+
+        // MARK: 收藏夹
+
+        let favorites = FavoritesStore(persisting: false)
+        check("收藏夹初始为空", favorites.items.isEmpty)
+        check("可以收藏文件夹", favorites.add(featureRoot))
+        check("重复收藏被忽略", !favorites.add(featureRoot))
+        let notAFolder = featureRoot.appendingPathComponent("不是文件夹.txt")
+        fm.createFile(atPath: notAFolder.path, contents: Data("x".utf8))
+        check("文件不能收藏", !favorites.add(notAFolder))
+        check("收藏夹里有 1 项", favorites.items.count == 1)
+        check("contains 忽略路径写法差异",
+              favorites.contains(featureRoot.appendingPathComponent(".")))
+        favorites.remove(featureRoot)
+        check("移除收藏", favorites.items.isEmpty)
+
+        // MARK: Quick Look
+
+        let quickLook = QuickLookController.shared
+        let qlURLs = [
+            featureRoot.appendingPathComponent("报告一.pdf"),
+            featureRoot.appendingPathComponent("报告二.pdf")
+        ]
+        quickLook.prepare(urls: qlURLs, startAt: qlURLs[1])
+        check("预览列表包含全部选中项", quickLook.urls.count == 2 && quickLook.index == 1,
+              "count=\(quickLook.urls.count) index=\(quickLook.index)")
+        var previewFocused: URL?
+        quickLook.onFocus = { previewFocused = $0 }
+        quickLook.step(1)
+        check("预览 ↓ 循环回第一项",
+              quickLook.index == 0 && previewFocused?.lastPathComponent == "报告一.pdf",
+              "index=\(quickLook.index) focus=\(previewFocused?.lastPathComponent ?? "nil")")
+        quickLook.step(-1)
+        check("预览 ↑ 回到最后一项", quickLook.index == 1, "实际 \(quickLook.index)")
+        quickLook.onFocus = nil
+        quickLook.prepare(urls: [], startAt: nil)
+
         let before = model.currentURL
         model.navigate(to: root.appendingPathComponent("no-such-dir"))
         check("打不开的目录给出提示而不是崩溃",

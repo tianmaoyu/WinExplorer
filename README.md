@@ -2,7 +2,7 @@
 
 macOS 上的「Windows 资源管理器」式文件浏览器，SwiftUI + Swift 原生实现，无 Xcode 工程、无第三方依赖。
 
-当前版本：**0.7.1（地址栏 + 搜索 + 属性 + 自动刷新）**，窗口尺寸 1060×680，启动后回到上次浏览的目录。
+当前版本：**0.8.0（标签页 + QuickLook + 收藏夹）**，窗口尺寸 1060×680，启动后回到上次浏览的目录。
 本阶段的重点是把「文件夹操作」做扎实，应用包（`.app`）一律按普通文件处理，不做应用专属逻辑。
 
 ## 已实现
@@ -38,6 +38,9 @@ macOS 上的「Windows 资源管理器」式文件浏览器，SwiftUI + Swift �
 | **列宽拖拽** | 拖动表头分隔线调整「大小 / 修改日期 / 类型」列宽，双击分隔线按内容自适应，⌘0 一次调好三列 |
 | **三种视图** | 详细信息（四列可排序）/ 列表（紧凑单列）/ 图标（网格），工具栏分段控件或 ⌘1 ⌘2 ⌘3 切换 |
 | **状态记忆** | 视图模式、列宽、排序方式、隐藏文件开关、上次浏览目录都会记住，重启原样恢复 |
+| **标签页** | ⌘T 新建（沿用当前目录）、⌘W 关闭、⌃Tab / ⌃⇧Tab 切换、点标签切换、拖标签排序；每个标签有独立目录/历史/选择/搜索；只剩一个标签时 ⌘W 关窗口 |
+| **快速预览** | 空格在系统 Quick Look 面板里预览选中项，多选时可 ↑↓ 在预览间切换并同步列表选中；再按空格或 Esc 关闭 |
+| **收藏夹** | 侧边栏「收藏夹」：点 + 收藏当前文件夹、右键文件夹「添加到收藏夹」、拖文件夹到标题添加、右键移除；存 UserDefaults，重启保留 |
 | 新建文件夹 | 重名自动编号「新建文件夹 2」，建完自动选中 |
 | 隐藏文件开关 | 默认隐藏 `.` 开头的文件和系统隐藏项 |
 | 右键菜单 | 打开 / 在 Finder 中显示 / 剪切 / 复制 / 粘贴到此处（文件夹）/ 复制路径 / 重命名 / 删除 / 刷新 |
@@ -55,6 +58,9 @@ macOS 上的「Windows 资源管理器」式文件浏览器，SwiftUI + Swift �
 | `⌘A` | 全选（Command 被重映射的键盘下用 `fn`+`A` 或 `⌥`+`A` 同样生效） |
 | `⌘C` / `⌘X` / `⌘V` | 复制 / 剪切 / 粘贴（`fn`+`C`、`fn`+`X`、`fn`+`V` 同样生效） |
 | `⌘Z` / `⇧⌘Z` | 撤销 / 重做（`fn`+`Z` 同样生效） |
+| `⌘T` / `⌘W` | 新建 / 关闭标签页 |
+| `⌃Tab` / `⌃⇧Tab` | 下一个 / 上一个标签页 |
+| `空格` | 快速预览（Quick Look） |
 | `⌘1` / `⌘2` / `⌘3` | 详细信息 / 列表 / 图标视图 |
 | `⌘0` | 自动调整三列列宽（详细信息视图） |
 | `⌘L` | 编辑地址栏（Enter 前往 / Tab 补全 / Esc 取消，`fn`+`L` 同样生效） |
@@ -90,18 +96,18 @@ App 用 ad-hoc 签名（`codesign -s -`）。首次访问桌面/文稿会弹一�
 
 | 环境变量 | 作用 |
 |---|---|
-| `WINEXPLORER_SELFTEST=1` | 在临时目录跑 151 项逻辑自检（读取、排序、多选、键盘焦点、导航、新建、重命名、删除、剪贴板、拖放、撤销重做、地址栏、搜索、属性面板、自动刷新、错误处理），打印 PASS/FAIL 后退出 |
+| `WINEXPLORER_SELFTEST=1` | 在临时目录跑 174 项逻辑自检（读取、排序、多选、键盘焦点、导航、新建、重命名、删除、剪贴板、拖放、撤销重做、地址栏、搜索、属性面板、自动刷新、标签页、收藏夹、QuickLook 预览列表、错误处理），打印 PASS/FAIL 后退出 |
 | `WINEXPLORER_START=/path` | 启动即打开指定目录，便于截图验收 |
 | `WINEXPLORER_SNAPSHOT=/tmp/x.png` | 窗口渲染完成后自截图再退出（用于无「屏幕录制」权限的环境） |
 | `WINEXPLORER_SNAPSHOT_DELAY=0.5` | 覆盖截图前的等待秒数，用来抓复制进度这类瞬时状态 |
-| `WINEXPLORER_KEYS=down,down,cmd+a` | 截图前先向窗口发按键，走真实响应链验证键盘；`menu:cmd+a` 走菜单派发，`fn+a` 复现 Command 被重映射的情况，`nav:/某个/路径` 跳目录，`drop:/某个/路径` 点亮某个落点，`drag:/某个/路径` 模拟一次拖拽，`type:文本` 往当前焦点输入框里打字，`touch:文件名` 在当前目录造一个文件（验证自动刷新） |
+| `WINEXPLORER_KEYS=down,down,cmd+a` | 截图前先向窗口发按键，走真实响应链验证键盘；`menu:cmd+a` 走菜单派发，`fn+a` 复现 Command 被重映射的情况，`nav:/某个/路径` 跳目录，`drop:/某个/路径` 点亮某个落点，`drag:/某个/路径` 模拟一次拖拽，`type:文本` 往当前焦点输入框里打字，`touch:文件名` 在当前目录造一个文件，`preview:/路径` 直接预览某个文件，`tab:new|close|next|prev` 操作标签页，`favorite:add|clear` 操作收藏夹 |
 | `WINEXPLORER_DRAG_DRYRUN=1` | 配合 `drag:` 使用：只打印"这次会拖哪些文件"，不真的进入模态拖拽会话 |
 
 ```bash
 WINEXPLORER_SELFTEST=1 ./build/WinExplorer.app/Contents/MacOS/WinExplorer
 ```
 
-最近一次自检结果：151/151 PASS（所有用例都在临时目录内，自检期间不写系统剪贴板、不写用户偏好、不开目录监听）。
+最近一次自检结果：174/174 PASS（所有用例都在临时目录内，自检期间不写系统剪贴板、不写用户偏好、不开目录监听）。
 
 ## 代码结构
 
@@ -113,19 +119,23 @@ Sources/WinExplorer/
 │   ├── FileItem.swift          # 行数据模型、列定义、面包屑、侧边栏位置
 │   ├── Clipboard.swift         # 文件剪贴板（复制/剪切两种语义）
 │   ├── UndoEntry.swift         # 一条可撤销操作（标题 + undo/redo）
-│   └── ViewPreferences.swift   # 视图模式、列宽、偏好持久化
+│   ├── ViewPreferences.swift   # 视图模式、列宽、偏好持久化
+│   └── FavoritesStore.swift    # 收藏夹（路径持久化）
 ├── Services/
 │   ├── FileSystemService.swift # 目录读取 + 排序（文件夹优先、自然排序）
 │   ├── TransferService.swift   # 递归复制/移动、同卷判定、副本命名、进度与取消
 │   ├── DragSupport.swift       # 行探针命中 + AppKit 拖拽会话 + onDrop 解析
 │   ├── DirectoryWatcher.swift  # vnode 事件源 + 防抖，外部改动自动刷新
 │   ├── FileInfoService.swift   # 属性数据 + 文件夹递归统计
+│   ├── QuickLookController.swift # QLPreviewPanel 的 dataSource/delegate
 │   ├── ShortcutMonitor.swift   # 在菜单之前接管 ⌘Z / ⌘I / ⌘F（SwiftUI 会先吃掉它们）
 │   ├── IconProvider.swift      # 系统图标缓存
 │   ├── SelfTest.swift          # 无界面逻辑自检
 │   └── SnapshotSupport.swift   # 无权限环境下的自截图 + 按键注入
 ├── ViewModels/BrowserModel.swift  # 导航栈、排序、选择、剪贴板、文件操作
 └── Views/
+    ├── RootView.swift          # 标签栏 + 当前标签
+    ├── TabBarView.swift        # 标签栏（每个标签自己观察自己的 model）
     ├── BrowserView.swift       # NavigationSplitView + 工具栏 + 错误条 + 进度卡
     ├── SidebarView.swift
     ├── PathBar.swift           # 面包屑 + 可编辑路径（⌘L）
@@ -143,7 +153,9 @@ Sources/WinExplorer/
 
 - 彻底删除（⇧⌘⌫）不可撤销，这是刻意的——它本来就不该有后悔药
 - 复制大目录时如果强退 App，目标目录会留下已完成的部分文件（进度卡上的「取消」会清理干净）
-- 拖拽的落点只支持文件夹行、空白处、侧边栏和面包屑，不支持拖到标签页（还没有标签页）
+- 标签页不跨启动恢复（重启只有一个标签，回到上次目录）；标签栏在只有一个标签时隐藏
+- 收藏夹存的是路径，目录被移动/改名后条目失效（点开会提示找不到）
+- Quick Look 面板里不能直接操作文件（重命名/删除），只是预览
 - 图标视图的图标尺寸固定（104×84 格），还不支持滑块缩放
 - 搜索只在当前文件夹内按文件名过滤，不递归子目录、不搜内容（全盘搜索请用 Spotlight）
 - 属性面板只读，不能在那里改权限或名称
@@ -169,14 +181,14 @@ Sources/WinExplorer/
 - ✅ 列宽拖拽并记住；视图切换（详细信息 / 列表 / 图标）
 - ✅ 地址栏可编辑（⌘L 手输路径 + Tab 自动补全）
 - 搜索框：当前目录即时过滤，回车转 Spotlight 全盘
-- 后退/前进历史下拉；标签页；双窗格
+- 后退/前进历史下拉；✅ 标签页；双窗格
 - ✅ UserDefaults 记住排序方式、隐藏文件开关、视图模式、列宽、上次目录
 - 状态栏显示磁盘剩余空间
 
 ### Phase 4 · 系统集成
-- QuickLook（QLPreviewPanel）、⌘I 属性面板、打开方式菜单
+- ✅ QuickLook（QLPreviewPanel）、✅ ⌘I 属性面板、打开方式菜单
 - Finder 标签、共享、压缩/解压
-- 侧边栏收藏夹自定义（拖入即收藏）
+- ✅ 侧边栏收藏夹自定义（拖入即收藏）
 - 全局快捷键唤出；菜单栏常驻模式（LSUIElement + NSPanel）
 - 打包 `.pkg` / DMG、开机自启（LaunchAgent）
 

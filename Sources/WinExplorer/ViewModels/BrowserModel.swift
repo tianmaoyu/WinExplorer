@@ -17,6 +17,9 @@ struct ScrollRequest: Equatable {
 /// 所有方法都在主线程调用（SwiftUI 的按钮/菜单/键盘回调），单目录读取是毫秒级的。
 final class BrowserModel: ObservableObject {
 
+    /// 标签身份（TabsModel / SwiftUI ForEach 用）
+    let tabID = UUID()
+
     @Published private(set) var currentURL: URL
     @Published private(set) var items: [FileItem] = []
     @Published private(set) var errorMessage: String?
@@ -782,6 +785,50 @@ final class BrowserModel: ObservableObject {
 
     func revealCurrentDirectory() {
         NSWorkspace.shared.activateFileViewerSelecting([currentURL])
+    }
+
+    // MARK: - 快速预览
+
+    /// 空格：系统 Quick Look 预览选中项（多选时以整个选区为预览列表）
+    func toggleQuickLook() {
+        let targets = selectedItems
+        guard !targets.isEmpty else {
+            showFlash("请先选中要预览的项目")
+            return
+        }
+        QuickLookController.shared.onFocus = { [weak self] url in
+            self?.focus(url: url)
+        }
+        QuickLookController.shared.toggle(
+            urls: targets.map(\.url),
+            startAt: focusedURL ?? targets.first?.url
+        )
+    }
+
+    // MARK: - 收藏夹
+
+    func addCurrentDirectoryToFavorites() {
+        if FavoritesStore.shared.add(currentURL) {
+            showFlash("已把「\(titleText)」加入收藏夹")
+        } else {
+            showFlash("「\(titleText)」已在收藏夹里")
+        }
+    }
+
+    func addToFavorites(_ item: FileItem) {
+        guard item.isFolderLike else {
+            showFlash("只能收藏文件夹")
+            return
+        }
+        if FavoritesStore.shared.add(item.url) {
+            showFlash("已收藏「\(item.name)」")
+        } else {
+            showFlash("「\(item.name)」已在收藏夹里")
+        }
+    }
+
+    var isCurrentDirectoryFavorite: Bool {
+        FavoritesStore.shared.contains(currentURL)
     }
 
     // MARK: - 属性面板

@@ -4,7 +4,7 @@ import SwiftUI
 @main
 struct WinExplorerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var model = BrowserModel()
+    @StateObject private var tabs = TabsModel()
 
     init() {
         if ProcessInfo.processInfo.environment["WINEXPLORER_SELFTEST"] == "1" {
@@ -14,13 +14,13 @@ struct WinExplorerApp: App {
 
     var body: some Scene {
         Window("WinExplorer", id: "main") {
-            BrowserView(model: model)
+            RootView(tabs: tabs)
                 .frame(minWidth: 840, minHeight: 500)
         }
         .defaultSize(width: 1060, height: 680)
         .windowToolbarStyle(.unified)
         .commands {
-            ExplorerCommands(model: model)
+            ExplorerCommands(tabs: tabs)
         }
     }
 }

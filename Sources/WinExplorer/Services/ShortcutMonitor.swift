@@ -34,14 +34,17 @@ final class ShortcutMonitor {
 
     private func handle(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags
-        let modifiers: NSEvent.ModifierFlags = [.command, .function, .option]
-        guard !flags.intersection(modifiers).isEmpty, !flags.contains(.control) else { return false }
 
-        // 显示简介 / 搜索这类组合先接管：即使焦点在文本框里也允许（⌘F 在搜索框里 = 全选重输）
-        if onShortcut(event) { return true }
+        // 应用级快捷键先接管（⌘I / ⌘F / ⌘T / ⌘W / ⌃Tab），由调用方决定是否消费
+        let shortcutModifiers: NSEvent.ModifierFlags = [.command, .control, .function, .option]
+        if !flags.intersection(shortcutModifiers).isEmpty, onShortcut(event) {
+            return true
+        }
 
         // 以下只处理 ⌘Z / ⇧⌘Z
-        guard event.keyCode == 6 else { return false }
+        guard event.keyCode == 6,
+              !flags.intersection([.command, .function, .option]).isEmpty,
+              !flags.contains(.control) else { return false }
         guard !isBlocked() else { return false }
 
         // 正在行内重命名时让系统去撤销文字编辑

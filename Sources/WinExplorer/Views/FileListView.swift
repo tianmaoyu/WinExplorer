@@ -357,12 +357,21 @@ struct FileListView: View {
                 model.open(item)
             }
         }
+        Button("快速预览") {
+            if !inSelection { model.selectOnly(item) }
+            model.toggleQuickLook()
+        }
         Button("在 Finder 中显示") {
             model.revealInFinder(item)
         }
         Button("显示简介") {
             if !inSelection { model.selectOnly(item) }
             model.showInfo()
+        }
+        if item.isFolderLike {
+            Button("添加到收藏夹") {
+                model.addToFavorites(item)
+            }
         }
         Divider()
         Button("剪切") {
@@ -416,6 +425,10 @@ struct FileListView: View {
         Button("搜索当前文件夹…") {
             model.beginSearch()
         }
+        Button("将当前文件夹添加到收藏夹") {
+            model.addCurrentDirectoryToFavorites()
+        }
+        .disabled(model.isCurrentDirectoryFavorite)
         Button("粘贴") {
             model.paste()
         }

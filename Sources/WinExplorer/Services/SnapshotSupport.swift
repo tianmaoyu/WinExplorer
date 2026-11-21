@@ -1,4 +1,5 @@
 import AppKit
+import Quartz
 
 /// 开发期自检工具：
 /// - `WINEXPLORER_SNAPSHOT=/tmp/x.png` 窗口渲染完成后自截图并退出
@@ -7,8 +8,9 @@ import AppKit
 enum SnapshotSupport {
     private static var hasScheduled = false
 
-    /// 由根视图在出现时调用，把模型交给截图脚本使用（支持 nav:/路径 这类开发指令）
-    static func scheduleIfNeeded(model: BrowserModel) {
+    /// 由根视图在出现时调用，把模型交给截图脚本使用（支持 nav:/路径 这类开发指令）。
+    /// 传了 tabs 时，所有指令都作用于「当前标签」，并额外支持 tab: 开头的标签指令。
+    static func scheduleIfNeeded(model: BrowserModel, tabs: TabsModel? = nil) {
         let env = ProcessInfo.processInfo.environment
         guard env["WINEXPLORER_SNAPSHOT"] != nil else { return }
         guard !hasScheduled else { return }
@@ -39,9 +41,34 @@ enum SnapshotSupport {
             // 逐个按键发送并留出间隔：像 F2 打开输入框这类操作需要等 UI 更新、焦点转移完成
             for (index, key) in keys.enumerated() {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.12 * Double(index)) {
+                    let active = tabs?.active ?? model
                     if key.hasPrefix("nav:") {
                         let target = String(key.dropFirst("nav:".count))
-                        model.navigate(to: URL(fileURLWithPath: target))
+                        active.navigate(to: URL(fileURLWithPath: target))
+                        return
+                    }
+                    if key.hasPrefix("tab:") {
+                        // tab:new / tab:close / tab:next / tab:prev，验证标签页
+                        guard let tabs else { return }
+                        switch String(key.dropFirst("tab:".count)) {
+                        case "new": tabs.newTab()
+                        case "close": tabs.closeActiveTab()
+                        case "next": tabs.selectNext(true)
+                        case "prev": tabs.selectNext(false)
+                        default: break
+                        }
+                        return
+                    }
+                    if key.hasPrefix("favorite:") {
+                        // favorite:add / favorite:clear，验证收藏夹
+                        switch String(key.dropFirst("favorite:".count)) {
+                        case "add": _ = FavoritesStore.shared.add(active.currentURL)
+                        case "clear":
+                            for place in FavoritesStore.shared.items {
+                                FavoritesStore.shared.remove(place.url)
+                            }
+                        default: break
+                        }
                         return
                     }
                     if key.hasPrefix("drag:") {
@@ -50,7 +77,14 @@ enum SnapshotSupport {
                     }
                     if key.hasPrefix("drop:") {
                         // 手动点亮某个落点，用于截图确认拖拽高亮
-                        model.dropTargetURL = URL(fileURLWithPath: String(key.dropFirst("drop:".count)))
+                        active.dropTargetURL = URL(fileURLWithPath: String(key.dropFirst("drop:".count)))
+                        return
+                    }
+                    if key.hasPrefix("preview:") {
+                        // 选中某个文件并打开 Quick Look（不依赖列表焦点，便于截图验收）
+                        let url = URL(fileURLWithPath: String(key.dropFirst("preview:".count)))
+                        active.focus(url: url, scroll: false)
+                        active.toggleQuickLook()
                         return
                     }
                     if key.hasPrefix("type:") {
@@ -61,7 +95,7 @@ enum SnapshotSupport {
                     if key.hasPrefix("touch:") {
                         // 在当前目录里造一个文件，用来验证目录监听是否真的会触发自动刷新
                         let name = String(key.dropFirst("touch:".count))
-                        let url = model.currentURL.appendingPathComponent(name)
+                        let url = active.currentURL.appendingPathComponent(name)
                         FileManager.default.createFile(atPath: url.path, contents: Data("snapshot hook".utf8))
                         return
                     }
@@ -125,9 +159,21 @@ enum SnapshotSupport {
             capture(view: sheet.contentView, to: sheetPath)
         }
 
+        // Quick Look 面板是独立窗口，主窗口截图里看不到，单独存一张
+        if QLPreviewPanel.sharedPreviewPanelExists(),
+           let panel = QLPreviewPanel.shared(), panel.isVisible, let view = panel.contentView {
+            let qlPath = path.replacingOccurrences(of: ".png", with: "-ql.png")
+            capture(view: view, to: qlPath)
+        }
+
         // 有 sheet（例如删除确认框）在时 terminate 会被模态会话挡住，直接退出进程
         if window.attachedSheet != nil {
             exit(0)
+        }
+        // 调试用：截图后留在原地，方便用系统截图抓 QuickLook 这类跨进程渲染的窗口
+        if ProcessInfo.processInfo.environment["WINEXPLORER_KEEPALIVE"] == "1" {
+            FileHandle.standardError.write(Data("snapshot: 保持运行（KEEPALIVE）\n".utf8))
+            return
         }
         NSApp.terminate(nil)
     }
@@ -155,6 +201,7 @@ enum SnapshotSupport {
             "return": (36, "\r"),
             "escape": (53, "\u{1B}"),
             "space": (49, " "),
+            "tab": (48, "\t"),
             "f2": (120, "\u{F705}"),
             "delete": (51, "\u{7F}"),
             "forwarddelete": (117, "\u{F728}")
