@@ -92,6 +92,12 @@ struct TabBarView: View {
 }
 
 /// 单个标签。单独成视图是为了让它观察自己那个 BrowserModel。
+///
+/// 视觉按 Windows 11 资源管理器的标签卡（adr/0009）：
+/// - 激活：白色圆角卡片 + 细边框 + 轻投影，浮在工具栏底色上（深色模式自适应成深卡片）
+/// - 未激活：透明（只剩图标 + 文字），悬停浮出浅色卡
+/// - `×`：激活标签常显；未激活标签悬停才显示（槽位保留，不产生布局跳动）
+/// - 拖文件悬停：accent 描边高亮（功能反馈，Win11 同样高亮目标标签）
 private struct TabChip: View {
     @ObservedObject var tab: BrowserModel
     let index: Int
@@ -118,6 +124,7 @@ private struct TabChip: View {
                 .frame(maxWidth: 168, alignment: .leading)
 
             if showsClose {
+                // 占位保留（否则悬停出现 × 时整卡宽度会跳），用透明度控制显隐
                 Button(action: onClose) {
                     Image(systemName: "xmark")
                         .font(.system(size: 9, weight: .bold))
@@ -126,6 +133,7 @@ private struct TabChip: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
+                .opacity(showsCloseButton ? 1 : 0)
                 .help(L("关闭标签页（⌘W）", "Close Tab (⌘W)"))
             }
         }
@@ -139,21 +147,30 @@ private struct TabChip: View {
             RoundedRectangle(cornerRadius: 6)
                 .stroke(strokeColor, lineWidth: 1)
         }
+        .compositingGroup()
+        .shadow(
+            color: .black.opacity(isActive && !isFileDropTarget ? 0.16 : 0),
+            radius: 2, y: 1
+        )
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .onHover { hovered = $0 }
         .help(tab.currentURL.path)
     }
 
+    /// Win11 规则：激活常显 `×`，未激活悬停才显示
+    private var showsCloseButton: Bool { isActive || hovered }
+
     private var background: Color {
-        if isActive { return Color.accentColor.opacity(0.16) }
+        // 激活 = 标签卡：textBackgroundColor 在浅色模式是白、深色模式是深卡片底
+        if isActive { return Color(nsColor: .textBackgroundColor) }
         if hovered { return Color.primary.opacity(0.06) }
         return Color.clear
     }
 
     private var strokeColor: Color {
         if isFileDropTarget { return Color.accentColor }
-        if isActive { return Color.accentColor.opacity(0.35) }
+        if isActive { return Color.primary.opacity(0.10) }
         return .clear
     }
 }

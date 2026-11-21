@@ -78,3 +78,5 @@
 | **全窗口截图** | `WINEXPLORER_SNAPSHOT_FULL=1` 抓含标题栏 / 工具栏的完整窗口（contentView 不含 chrome） | `SnapshotSupport.capture` |
 | **弹性空白** | `NSToolbar` 的 `flexibleSpace` item：占住剩余宽度把后面的 item 顶到最右。SwiftUI 不暴露，只能经 AppKit 插入 | `ToolbarRightAlignFix` |
 | **工具栏定宽幻觉** | SwiftUI 工具栏 item 只按内容理想尺寸布局，`Spacer` / `maxWidth(.infinity)` 都撑不开 | `ToolbarRightAlignFix` 注释 |
+| **标签卡** | Win11 风格的标签视觉：激活=白色圆角卡片+轻投影，未激活=透明，悬停=浅色卡，`×` 激活常显/悬停显示 | `TabChip`（adr/0009） |
+
