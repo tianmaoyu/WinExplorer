@@ -14,6 +14,8 @@ enum SelfTest {
         BrowserModel.watchesFileSystem = false
         // 搜索防抖会让「设完 searchText 立刻断言」失效，自检里关掉
         BrowserModel.debouncesSearch = false
+        // 目录读取默认同步，navigate 完立刻能断言；异步路径单独有一条用例
+        BrowserModel.loadsDirectorySynchronously = true
         Preferences.enabled = false
 
         var failures = 0
@@ -1386,6 +1388,37 @@ enum SelfTest {
         check("拖到 + 号新建了标签", freshTabs.count == 2)
         check("新标签里已有拖入的文件",
               freshTabs.active.items.contains { $0.name == "新标签.txt" })
+
+        // MARK: 目录异步读取（adr/0013）
+        // 切到异步路径，navigate 后泵一会儿 runloop，等后台结果回主线程
+        BrowserModel.loadsDirectorySynchronously = false
+        model.navigate(to: folderA)
+        let loadDeadline = Date().addingTimeInterval(3)
+        while model.isLoadingDirectory && Date() < loadDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        }
+        check("异步读目录：会走完加载态", !model.isLoadingDirectory)
+        check("异步读目录：结果落到列表里",
+              model.currentURL.standardizedFileURL == folderA.standardizedFileURL && model.items.isEmpty,
+              "current=\(model.currentURL.lastPathComponent) items=\(model.items.count)")
+
+        // 连点两个目录：只有最后一次的结果能落地（代次校验）
+        let folderC = root.appendingPathComponent("gamma")
+        try? fm.createDirectory(at: folderC, withIntermediateDirectories: false)
+        model.navigate(to: root)
+        model.navigate(to: folderC)
+        let raceDeadline = Date().addingTimeInterval(3)
+        while Date() < raceDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+            if !model.isLoadingDirectory { break }
+        }
+        check("异步读目录：连点不同目录时以最后一次为准",
+              model.currentURL.standardizedFileURL == folderC.standardizedFileURL,
+              "实际 \(model.currentURL.lastPathComponent)")
+
+        // 还原：同步模式 + 回到测试根目录，后面的用例依赖这份列表
+        BrowserModel.loadsDirectorySynchronously = true
+        model.navigate(to: root)
 
         check("本地化按当前语言取文案", L("甲", "A") == (L10n.isEnglish ? "A" : "甲"))
 

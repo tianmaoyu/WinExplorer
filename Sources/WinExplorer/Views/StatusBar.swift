@@ -18,7 +18,16 @@ struct StatusBar: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            if let flash = model.flash {
+            // 目录在后台读：给一个明确的进行中反馈，否则点完像是没反应
+            if model.isLoadingDirectory {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.6)
+                    .frame(width: 12, height: 12)
+                Text(L("正在读取…", "Loading…"))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            } else if let flash = model.flash {
                 Text(flash)
                     .font(.system(size: 11))
                     .foregroundStyle(Color.accentColor)

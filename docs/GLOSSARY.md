@@ -87,3 +87,6 @@
 | **排序缓存** | 缓存全量排序结果；过滤不改变相对顺序，敲搜索词时只做线性过滤不重排 | `BrowserModel.sortedCache` |
 | **搜索防抖** | 搜索输入停 0.18s 后才过滤，避免每个字符都全量过滤+排序 | `BrowserModel.debouncesSearch` |
 | **图标异步化** | 列表行不在 body 里同步问系统要图标：先占位，后台队列生成后回填；同步入口只留给一次画一两个的地方 | `IconProvider.iconAsync(for:)`（adr/0012） |
+| **读取代次** | 每次 `load` 自增的序号；结果回到主线程时序号不符就整包丢弃，避免连点目录时旧结果覆盖新结果 | `BrowserModel.loadGeneration`（adr/0013） |
+| **待揭示 URL** | 压缩/解压完成后要选中的产物；目录异步读，读完前列表里还没有它，先记下、读完后补选中 | `BrowserModel.pendingRevealURL` |
+| **加载态** | 目录正在后台读取时状态栏的小转圈与「正在读取…」 | `BrowserModel.isLoadingDirectory` |

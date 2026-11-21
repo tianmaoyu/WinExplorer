@@ -40,6 +40,8 @@ final class BrowserModel: ObservableObject {
     @Published private(set) var currentURL: URL
     @Published private(set) var items: [FileItem] = []
     @Published private(set) var errorMessage: String?
+    /// 目录正在后台读取（状态栏显示小转圈，避免"点了没反应"的错觉）
+    @Published private(set) var isLoadingDirectory = false
     @Published var flash: String?
 
     /// 多选集合
@@ -145,6 +147,8 @@ final class BrowserModel: ObservableObject {
     static var watchesFileSystem = true
     /// 搜索是否防抖（自检里关掉，设完 searchText 立刻能断言过滤结果）
     static var debouncesSearch = true
+    /// 目录读取是否同步（自检里打开，navigate 完立刻能断言；生产路径始终后台读）
+    static var loadsDirectorySynchronously = false
 
     // MARK: - 撤销栈
 
@@ -606,16 +610,53 @@ final class BrowserModel: ObservableObject {
         return result
     }
 
+    /// 目录读取的代次：连点不同目录时，先发出的那次结果回来会被丢弃（adr/0013）
+    private var loadGeneration = 0
+
     private func load(directory url: URL, recordHistory: Bool) {
         let standardized = url.standardizedFileURL
         let directoryChanged = standardized.path != currentURL.standardizedFileURL.path
-        do {
-            let loaded = try FileSystemService.contents(of: standardized)
-            if recordHistory, standardized != currentURL {
+
+        loadGeneration += 1
+        let generation = loadGeneration
+        isLoadingDirectory = true
+
+        // 自检：同步读，保持「构造完 / navigate 完立刻断言」的写法
+        if Self.loadsDirectorySynchronously {
+            let result = Result { try FileSystemService.contents(of: standardized) }
+            applyLoad(result, url: standardized, recordHistory: recordHistory,
+                      directoryChanged: directoryChanged, generation: generation)
+            return
+        }
+
+        // 目录读取放到后台：网络卷断线、几万项目录都不该冻住窗口
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = Result { try FileSystemService.contents(of: standardized) }
+            DispatchQueue.main.async {
+                self?.applyLoad(result, url: standardized, recordHistory: recordHistory,
+                                directoryChanged: directoryChanged, generation: generation)
+            }
+        }
+    }
+
+    /// 读取结果回到主线程后的落地：代次不符说明用户已经切走了，整包丢弃
+    private func applyLoad(
+        _ result: Result<[FileItem], Error>,
+        url: URL,
+        recordHistory: Bool,
+        directoryChanged: Bool,
+        generation: Int
+    ) {
+        guard generation == loadGeneration else { return }
+        isLoadingDirectory = false
+
+        switch result {
+        case .success(let loaded):
+            if recordHistory, url != currentURL {
                 backStack.append(currentURL)
                 forwardStack.removeAll()
             }
-            currentURL = standardized
+            currentURL = url
             allItems = loaded
             invalidateSortCache()
             directorySignature = Self.signature(of: loaded)
@@ -631,11 +672,13 @@ final class BrowserModel: ObservableObject {
             isEditingPath = false
             pathError = nil
             closeInfo()
-            Preferences.lastDirectoryPath = standardized.path
+            Preferences.lastDirectoryPath = url.path
             applySortAndFilter()
             refreshFolderSizes()
-            watchDirectory(standardized)
-        } catch {
+            watchDirectory(url)
+            // 压缩/解压完成后要选中新产物：那时列表可能还没读完，读完后补一次
+            applyPendingReveal()
+        case .failure(let error):
             // 权限问题不弹系统横幅式的错误条，改成窗口内的授权浮层：
             // 用户需要的是「怎么授权」，不是一行 error.localizedDescription
             if PermissionService.isPermissionDenied(error) {
@@ -1933,9 +1976,20 @@ final class BrowserModel: ObservableObject {
     }
 
     /// 操作完成后把新生成的项选中并滚进视口（不在当前目录就只刷新）
+    /// 压缩 / 解压完成要选中的产物。目录是异步读的，读完前列表里还没有它，
+    /// 所以先记下来，读完后由 applyPendingReveal() 补上
+    private var pendingRevealURL: URL?
+
     private func revealNewItem(_ url: URL) {
-        let path = url.standardizedFileURL.path
+        pendingRevealURL = url.standardizedFileURL
+        applyPendingReveal()
+    }
+
+    private func applyPendingReveal() {
+        guard let target = pendingRevealURL else { return }
+        let path = target.path
         guard let match = items.first(where: { $0.url.standardizedFileURL.path == path }) else { return }
+        pendingRevealURL = nil
         selection = [match.url]
         focusedURL = match.url
         anchorURL = match.url
