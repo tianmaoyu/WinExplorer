@@ -26,32 +26,57 @@ struct PathBar: View {
     // MARK: - 面包屑
 
     private var crumbsBar: some View {
-        ZStack(alignment: .leading) {
-            // 空白处点一下即可输入路径（和资源管理器的地址栏一致）
-            Color(nsColor: .windowBackgroundColor)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    model.beginPathEditing()
-                }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 2) {
-                    ForEach(Array(model.crumbs.enumerated()), id: \.element.id) { index, crumb in
-                        if index > 0 {
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 8, weight: .semibold))
-                                .foregroundStyle(.tertiary)
-                                .padding(.horizontal, 1)
-                        }
-                        crumbButton(crumb, isLast: index == model.crumbs.count - 1)
+        HStack(spacing: 0) {
+            ZStack(alignment: .leading) {
+                // 空白处点一下即可输入路径（和资源管理器的地址栏一致）
+                Color(nsColor: .windowBackgroundColor)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        model.beginPathEditing()
                     }
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 2) {
+                        ForEach(Array(model.crumbs.enumerated()), id: \.element.id) { index, crumb in
+                            if index > 0 {
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 8, weight: .semibold))
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.horizontal, 1)
+                            }
+                            crumbButton(crumb, isLast: index == model.crumbs.count - 1)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
             }
+
+            searchBox
+                .frame(width: 164)
+                .padding(.trailing, 10)
         }
         .frame(height: 34)
         .help("点空白处输入路径（⌘L）")
+    }
+
+    /// 右上角的搜索框：只过滤当前文件夹，不递归
+    private var searchBox: some View {
+        SearchField(
+            text: model.searchText,
+            focusToken: model.searchFocusRequest,
+            placeholder: "搜索",
+            onChange: { model.searchText = $0 },
+            onSubmit: {
+                // 回车确认搜索：焦点还回列表，方向键可以继续挑结果
+                DispatchQueue.main.async { FocusKeeper.shared.reclaim(force: true) }
+            },
+            onCancel: {
+                model.clearSearch()
+                DispatchQueue.main.async { FocusKeeper.shared.reclaim(force: true) }
+            }
+        )
+        .frame(height: 20)
     }
 
     private func crumbButton(_ crumb: Crumb, isLast: Bool) -> some View {

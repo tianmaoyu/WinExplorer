@@ -40,6 +40,12 @@ struct ExplorerCommands: Commands {
             .keyboardShortcut("o", modifiers: .command)
             .disabled(!model.hasSelection)
 
+            Button("显示简介") {
+                model.showInfo()
+            }
+            .keyboardShortcut("i", modifiers: .command)
+            .disabled(!model.hasSelection)
+
             Button("重命名…") {
                 model.beginRename()
             }
@@ -137,6 +143,11 @@ struct ExplorerCommands: Commands {
                 model.beginPathEditing()
             }
             .keyboardShortcut("l", modifiers: .command)
+
+            Button("搜索当前文件夹…") {
+                model.beginSearch()
+            }
+            .keyboardShortcut("f", modifiers: .command)
 
             Divider()
 

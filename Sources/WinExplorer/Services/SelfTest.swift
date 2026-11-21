@@ -10,6 +10,8 @@ enum SelfTest {
         // 自检不碰系统剪贴板，复制/移动同步执行以便断言；也不写用户偏好
         BrowserModel.syncsSystemPasteboard = false
         BrowserModel.runsTransfersSynchronously = true
+        BrowserModel.computesFolderSizeSynchronously = true
+        BrowserModel.watchesFileSystem = false
         Preferences.enabled = false
 
         var failures = 0
@@ -607,6 +609,114 @@ enum SelfTest {
         check("~ 能展开成个人文件夹",
               homeCompletion?.hasPrefix(fm.homeDirectoryForCurrentUser.path) == true,
               "实际 \(homeCompletion ?? "nil")")
+
+        // MARK: 搜索
+
+        let featureRoot = root.appendingPathComponent("功能测试")
+        try? fm.createDirectory(at: featureRoot, withIntermediateDirectories: true)
+        fm.createFile(atPath: featureRoot.appendingPathComponent("报告一.pdf").path,
+                      contents: Data(repeating: 0, count: 2048))
+        fm.createFile(atPath: featureRoot.appendingPathComponent("报告二.pdf").path,
+                      contents: Data(repeating: 0, count: 1024))
+        fm.createFile(atPath: featureRoot.appendingPathComponent("图片.png").path,
+                      contents: Data(repeating: 0, count: 512))
+        let nested = featureRoot.appendingPathComponent("素材")
+        try? fm.createDirectory(at: nested, withIntermediateDirectories: true)
+        fm.createFile(atPath: nested.appendingPathComponent("a.bin").path,
+                      contents: Data(repeating: 0, count: 3000))
+
+        model.navigate(to: featureRoot)
+        check("功能目录读到 4 项", model.items.count == 4, "实际 \(model.items.count)")
+
+        model.searchText = "报告"
+        check("搜索按名称过滤",
+              model.items.count == 2 && model.items.allSatisfy { $0.name.contains("报告") },
+              "实际 \(model.items.map(\.name))")
+        check("搜索处于激活态", model.isSearching)
+
+        model.searchText = "报告一"
+        check("搜索能进一步收窄", model.items.count == 1, "实际 \(model.items.map(\.name))")
+
+        model.searchText = "Pdf"
+        check("搜索忽略大小写", model.items.count == 2, "实际 \(model.items.map(\.name))")
+
+        model.searchText = "zzz"
+        check("无匹配时列表为空", model.items.isEmpty, "实际 \(model.items.map(\.name))")
+
+        model.searchText = ""
+        check("清空搜索恢复全部", model.items.count == 4)
+
+        model.selectAll()
+        model.searchText = "报告"
+        check("过滤后选择被裁剪", model.selection.count == 2, "实际 \(model.selection.count)")
+
+        model.navigate(to: nested)
+        check("换目录自动清空搜索", !model.isSearching && model.searchText.isEmpty)
+
+        // MARK: 属性面板
+
+        model.navigate(to: featureRoot)
+        model.focus(url: featureRoot.appendingPathComponent("报告一.pdf"))
+        model.showInfo()
+        check("属性面板有内容", model.info != nil)
+        check("属性标题是文件名", model.info?.title == "报告一.pdf", "实际 \(model.info?.title ?? "nil")")
+        check("属性里带大小",
+              model.info?.fields.contains { $0.id == "size" && $0.value.contains("KB") } == true,
+              "实际 \(model.info?.fields.first { $0.id == "size" }?.value ?? "nil")")
+        check("属性里带扩展名",
+              model.info?.fields.contains { $0.id == "ext" && $0.value == ".pdf" } == true)
+        model.closeInfo()
+        check("关闭属性面板", model.info == nil)
+
+        let stats = FileInfoService.folderStats(featureRoot)
+        check("文件夹递归统计文件数", stats.fileCount == 4, "实际 \(stats.fileCount)")
+        check("文件夹递归统计字节数",
+              stats.bytes == 2048 + 1024 + 512 + 3000,
+              "实际 \(stats.bytes)")
+        check("文件夹递归统计子文件夹数", stats.folderCount == 1, "实际 \(stats.folderCount)")
+
+        model.focus(url: nested)
+        model.showInfo()
+        check("文件夹属性会回填大小",
+              model.info?.note == nil
+                && model.info?.fields.contains { $0.id == "size" && $0.value != "计算中…" } == true,
+              "实际 note=\(model.info?.note ?? "nil")")
+        check("文件夹属性显示包含项",
+              model.info?.fields.contains { $0.id == "items" && $0.value.contains("1 个文件") } == true,
+              "实际 \(model.info?.fields.first { $0.id == "items" }?.value ?? "nil")")
+        model.closeInfo()
+
+        model.selectAll()
+        model.showInfo()
+        check("多选属性显示项目数", model.info?.title == "4 个项目", "实际 \(model.info?.title ?? "nil")")
+        check("多选属性汇总大小",
+              model.info?.fields.first { $0.id == "size" }?.value != "计算中…")
+        model.closeInfo()
+
+        let perms = FileInfoService.permissionText(
+            attributes: [.posixPermissions: NSNumber(value: 0o755)],
+            isDirectory: true
+        )
+        check("权限串格式", perms.hasPrefix("drwxr-xr-x"), "实际 \(perms)")
+
+        // MARK: 自动刷新
+
+        model.clearSelection()
+        model.focus(url: featureRoot.appendingPathComponent("图片.png"))
+        let beforeRefresh = model.items.count
+        fm.createFile(atPath: featureRoot.appendingPathComponent("外部新增.txt").path, contents: Data("x".utf8))
+        model.refreshFromDisk()
+        check("外部新增文件后自动刷新",
+              model.items.count == beforeRefresh + 1, "实际 \(model.items.count)")
+        check("自动刷新保留选择和焦点",
+              model.selection.count == 1 && model.focusedURL?.lastPathComponent == "图片.png",
+              "选中 \(model.selection.map(\.lastPathComponent))")
+
+        try? fm.removeItem(at: featureRoot.appendingPathComponent("外部新增.txt"))
+        model.refreshFromDisk()
+        check("外部删除后自动刷新", model.items.count == beforeRefresh, "实际 \(model.items.count)")
+
+        model.searchText = ""
 
         let before = model.currentURL
         model.navigate(to: root.appendingPathComponent("no-such-dir"))

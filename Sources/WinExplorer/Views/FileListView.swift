@@ -360,6 +360,10 @@ struct FileListView: View {
         Button("在 Finder 中显示") {
             model.revealInFinder(item)
         }
+        Button("显示简介") {
+            if !inSelection { model.selectOnly(item) }
+            model.showInfo()
+        }
         Divider()
         Button("剪切") {
             if !inSelection { model.selectOnly(item) }
@@ -409,6 +413,9 @@ struct FileListView: View {
         Button("新建文件夹") {
             model.createFolder()
         }
+        Button("搜索当前文件夹…") {
+            model.beginSearch()
+        }
         Button("粘贴") {
             model.paste()
         }
@@ -446,15 +453,24 @@ struct FileListView: View {
 
     private var emptyState: some View {
         VStack(spacing: 8) {
-            Image(systemName: "folder")
+            Image(systemName: model.isSearching ? "magnifyingglass" : "folder")
                 .font(.system(size: 36, weight: .light))
                 .foregroundStyle(.quaternary)
-            Text("此文件夹为空")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-            Text("⇧⌘N 可以新建文件夹")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
+            if model.isSearching {
+                Text("没有与「\(model.searchQuery)」匹配的项目")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                Text("Esc 退出搜索，⌘F 换个关键词")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            } else {
+                Text("此文件夹为空")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                Text("⇧⌘N 可以新建文件夹")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            }
         }
     }
 }

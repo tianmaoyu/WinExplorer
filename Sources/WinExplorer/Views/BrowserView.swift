@@ -16,9 +16,27 @@ struct BrowserView: View {
             SnapshotSupport.scheduleIfNeeded(model: model)
             installDragSource()
             ShortcutMonitor.shared.install(
-                isBlocked: { model.pendingPermanentDelete != nil },
+                isBlocked: { model.hasModalOverlay },
                 onUndo: { model.undo() },
-                onRedo: { model.redo() }
+                onRedo: { model.redo() },
+                onShortcut: { event in
+                    // SwiftUI 会在菜单层把这些组合吃掉且不调用 action（和 ⌘Z 同一个坑），
+                    // 只能在 sendEvent 之前接管。
+                    switch event.keyCode {
+                    case 34: // I = 显示简介 / 再按一次关闭
+                        if model.info != nil {
+                            model.closeInfo()
+                        } else if !model.hasModalOverlay {
+                            model.showInfo()
+                        }
+                        return true
+                    case 3: // F = 搜索当前目录
+                        if !model.hasModalOverlay { model.beginSearch() }
+                        return true
+                    default:
+                        return false
+                    }
+                }
             )
         }
         .overlay {
@@ -27,6 +45,15 @@ struct BrowserView: View {
                     items: targets,
                     onCancel: { model.cancelPermanentDelete() },
                     onConfirm: { model.confirmPermanentDelete() }
+                )
+            }
+        }
+        .overlay {
+            if let info = model.info {
+                InfoPanelView(
+                    state: info,
+                    onReveal: { model.revealInfoTarget() },
+                    onClose: { model.closeInfo() }
                 )
             }
         }
@@ -113,12 +140,34 @@ struct BrowserView: View {
     private func handleKey(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags
 
-        // 确认层打开时拦住所有按键，只允许 Esc 取消，避免在浮层后面误操作列表
-        if model.pendingPermanentDelete != nil {
-            if event.keyCode == 53 {
+        // 浮层（彻底删除确认 / 属性面板）打开时拦住所有按键：
+        // Esc 或 Return 关闭，⌘I 切掉属性面板，其它一律忽略，避免在浮层后面误操作列表
+        if model.hasModalOverlay {
+            if event.keyCode == 53 || event.keyCode == 36 || event.keyCode == 76 {
                 model.cancelPermanentDelete()
+                model.closeInfo()
+            } else if event.keyCode == 34 {
+                model.closeInfo()
             }
             return true
+        }
+
+        // I = 显示简介（⌘I），兼容 Command 被重映射后的 fn+I
+        if event.keyCode == 34 {
+            let infoFlags: NSEvent.ModifierFlags = [.command, .function]
+            if !flags.intersection(infoFlags).isEmpty, !flags.contains(.control) {
+                model.showInfo()
+                return true
+            }
+        }
+
+        // F = 搜索当前目录（⌘F），同样兼容 fn+F
+        if event.keyCode == 3 {
+            let findFlags: NSEvent.ModifierFlags = [.command, .function]
+            if !flags.intersection(findFlags).isEmpty, !flags.contains(.control) {
+                model.beginSearch()
+                return true
+            }
         }
 
         // A = 全选：兼容 ⌘A、以及 Command 被重映射后的 fn+A / ⌥+A
@@ -230,8 +279,9 @@ struct BrowserView: View {
         case 36, 76: // Return / 小键盘 Enter
             model.openSelection()
         case 53: // Esc
-            if model.pendingPermanentDelete != nil {
-                model.cancelPermanentDelete()
+            if model.isSearching {
+                // 先退出搜索，再按一次才是清空选择
+                model.clearSearch()
             } else if model.isTransferring {
                 model.cancelTransfer()
             } else {

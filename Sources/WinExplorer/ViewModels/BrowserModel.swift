@@ -51,6 +51,19 @@ final class BrowserModel: ObservableObject {
     /// 地址栏编辑的错误提示（路径不存在等）
     @Published private(set) var pathError: String?
 
+    /// 当前目录的搜索词（实时过滤，不递归子目录）
+    @Published var searchText: String = "" {
+        didSet {
+            guard searchText != oldValue else { return }
+            applySortAndFilter()
+        }
+    }
+    /// 视图消费后把焦点放进搜索框（⌘F 每次都是新的 token，连按会重新全选）
+    @Published private(set) var searchFocusRequest: UUID?
+
+    /// 属性面板的内容（nil 表示关闭）
+    @Published private(set) var info: InfoSheetState?
+
     /// 视图模式
     @Published var viewMode: ViewMode = Preferences.viewMode {
         didSet {
@@ -69,6 +82,10 @@ final class BrowserModel: ObservableObject {
     static var syncsSystemPasteboard = true
     /// 自检时同步执行复制/移动，便于断言（生产路径始终异步）
     static var runsTransfersSynchronously = false
+    /// 自检时不算属性面板的文件夹大小（避免在临时目录里递归等待）
+    static var computesFolderSizeSynchronously = false
+    /// 自检时关掉目录监听（用例会自己造/删文件，自动刷新会干扰断言）
+    static var watchesFileSystem = true
 
     // MARK: - 撤销栈
 
@@ -208,6 +225,15 @@ final class BrowserModel: ObservableObject {
     private var cachedPasteboardChangeCount = -1
     private var cachedPasteboardURLs: [URL] = []
 
+    /// 目录监听（外部新增/删除文件时自动刷新）
+    private let directoryWatcher = DirectoryWatcher()
+    /// 上一次读到的目录快照（用来判断内容是否真的变了，避免无意义刷新）
+    private var directorySignature: [String] = []
+    /// 正在显示属性的目标（异步统计文件夹大小要用）
+    private var infoTargets: [FileItem] = []
+    /// 属性面板的代次：用户关掉或换目标后，旧的统计结果直接丢弃
+    private var infoGeneration = 0
+
     /// 根卷的名字，比如 "Macintosh HD"
     static let volumeName: String = {
         let root = URL(fileURLWithPath: "/")
@@ -233,6 +259,11 @@ final class BrowserModel: ObservableObject {
         let start = requested.standardizedFileURL
         currentURL = start
         load(directory: start, recordHistory: false)
+
+        // 外部程序在这个目录里新建/删除/改名时自动刷新
+        directoryWatcher.onChange = { [weak self] in
+            self?.handleDirectoryChange()
+        }
     }
 
     // MARK: - 导航状态
@@ -335,6 +366,23 @@ final class BrowserModel: ObservableObject {
         errorMessage = nil
     }
 
+    // MARK: - 搜索
+
+    var searchQuery: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var isSearching: Bool { !searchQuery.isEmpty }
+
+    /// ⌘F：把焦点放进搜索框并全选已有内容
+    func beginSearch() {
+        searchFocusRequest = UUID()
+    }
+
+    func clearSearch() {
+        searchText = ""
+    }
+
     // MARK: - 地址栏
 
     func beginPathEditing() {
@@ -433,14 +481,19 @@ final class BrowserModel: ObservableObject {
     }
 
     private func load(directory url: URL, recordHistory: Bool) {
+        let standardized = url.standardizedFileURL
+        let directoryChanged = standardized.path != currentURL.standardizedFileURL.path
         do {
-            let loaded = try FileSystemService.contents(of: url)
-            if recordHistory, url != currentURL {
+            let loaded = try FileSystemService.contents(of: standardized)
+            if recordHistory, standardized != currentURL {
                 backStack.append(currentURL)
                 forwardStack.removeAll()
             }
-            currentURL = url
+            currentURL = standardized
             allItems = loaded
+            directorySignature = Self.signature(of: loaded)
+            // 换目录时搜索词不再适用（搜索只针对当前文件夹）
+            if directoryChanged { searchText = "" }
             clearSelection()
             renamingURL = nil
             pendingPermanentDelete = nil
@@ -448,8 +501,10 @@ final class BrowserModel: ObservableObject {
             errorMessage = nil
             isEditingPath = false
             pathError = nil
-            Preferences.lastDirectoryPath = url.path
+            closeInfo()
+            Preferences.lastDirectoryPath = standardized.path
             applySortAndFilter()
+            watchDirectory(standardized)
         } catch {
             errorMessage = "无法打开「\(url.lastPathComponent)」：\(error.localizedDescription)"
         }
@@ -460,6 +515,10 @@ final class BrowserModel: ObservableObject {
         if !showHidden {
             visible = visible.filter { !$0.isHidden }
         }
+        let query = searchQuery
+        if !query.isEmpty {
+            visible = visible.filter { $0.name.localizedStandardContains(query) }
+        }
         items = FileSystemService.sort(visible, by: sortColumn, ascending: sortAscending)
 
         let visibleURLs = Set(items.map(\.url))
@@ -469,6 +528,47 @@ final class BrowserModel: ObservableObject {
         }
         if let anchor = anchorURL, !visibleURLs.contains(anchor) {
             anchorURL = nil
+        }
+    }
+
+    // MARK: - 目录监听
+
+    private static func signature(of items: [FileItem]) -> [String] {
+        items.map {
+            "\($0.url.path)|\($0.size ?? -1)|\($0.modified?.timeIntervalSince1970 ?? 0)|\($0.isDirectory)"
+        }
+        .sorted()
+    }
+
+    private func watchDirectory(_ url: URL) {
+        guard Self.watchesFileSystem else { return }
+        directoryWatcher.watch(url)
+    }
+
+    private func handleDirectoryChange() {
+        // 用户正在编辑或确认时不打断：这些操作结束时会各自 reload
+        guard renamingURL == nil,
+              pendingPermanentDelete == nil,
+              info == nil,
+              !isEditingPath,
+              transfer == nil else { return }
+        refreshFromDisk()
+    }
+
+    /// 外部变更后重新读目录：保留选择与焦点，只有内容真的变了才更新（避免无谓刷新）
+    func refreshFromDisk() {
+        do {
+            let loaded = try FileSystemService.contents(of: currentURL)
+            let signature = Self.signature(of: loaded)
+            guard signature != directorySignature else { return }
+            directorySignature = signature
+            allItems = loaded
+            applySortAndFilter()
+        } catch {
+            if errorMessage == nil {
+                errorMessage = "「\(currentURL.lastPathComponent)」已不可访问：\(error.localizedDescription)"
+            }
+            directoryWatcher.stop()
         }
     }
 
@@ -682,6 +782,92 @@ final class BrowserModel: ObservableObject {
 
     func revealCurrentDirectory() {
         NSWorkspace.shared.activateFileViewerSelecting([currentURL])
+    }
+
+    // MARK: - 属性面板
+
+    /// ⌘I / 右键「显示简介」
+    func showInfo() {
+        let targets = selectedItems
+        guard !targets.isEmpty else {
+            showFlash("请先选中要查看属性的项目")
+            return
+        }
+
+        infoGeneration += 1
+        let token = infoGeneration
+        infoTargets = targets
+
+        let state = targets.count == 1
+            ? FileInfoService.state(for: targets[0])
+            : FileInfoService.state(for: targets)
+        info = state
+
+        let folders = targets.filter(\.isDirectory).map(\.url)
+        guard !folders.isEmpty else { return }
+
+        let compute: () -> [String: FileInfoService.FolderStats] = {
+            var result: [String: FileInfoService.FolderStats] = [:]
+            for url in folders {
+                result[url.standardizedFileURL.path] = FileInfoService.folderStats(url)
+            }
+            return result
+        }
+
+        let apply: ([String: FileInfoService.FolderStats]) -> Void = { [weak self] stats in
+            guard let self else { return }
+            self.applyFolderStats(stats, token: token)
+        }
+
+        // 自检模式同步算，生产路径丢到后台，避免大文件夹卡住界面
+        if Self.computesFolderSizeSynchronously {
+            apply(compute())
+        } else {
+            DispatchQueue.global(qos: .userInitiated).async {
+                let stats = compute()
+                DispatchQueue.main.async { apply(stats) }
+            }
+        }
+    }
+
+    private func applyFolderStats(_ stats: [String: FileInfoService.FolderStats], token: Int) {
+        guard token == infoGeneration, var state = info else { return }
+
+        if infoTargets.count == 1, let item = infoTargets.first {
+            let key = item.url.standardizedFileURL.path
+            FileInfoService.apply(stats[key] ?? FileInfoService.FolderStats(), to: &state)
+        } else {
+            var bytes = infoTargets
+                .filter { !$0.isDirectory }
+                .reduce(Int64(0)) { $0 + ($1.size ?? 0) }
+            for item in infoTargets where item.isDirectory {
+                bytes += stats[item.url.standardizedFileURL.path]?.bytes ?? 0
+            }
+            state.set("size", to: FileInfoService.byteText(bytes))
+            state.note = nil
+        }
+        info = state
+    }
+
+    func closeInfo() {
+        guard info != nil || !infoTargets.isEmpty else { return }
+        infoGeneration += 1
+        info = nil
+        infoTargets = []
+    }
+
+    /// 属性面板里点「在 Finder 中显示」
+    func revealInfoTarget() {
+        if infoTargets.count == 1, let item = infoTargets.first {
+            revealInFinder(item)
+        } else if !infoTargets.isEmpty {
+            NSWorkspace.shared.activateFileViewerSelecting(infoTargets.map(\.url))
+        }
+    }
+
+    /// 属性面板打开时，方向键/快捷键不应继续操作后台列表
+    var hasModalOverlay: Bool {
+        info != nil || pendingPermanentDelete != nil
     }
 
     // MARK: - 剪贴板

@@ -55,9 +55,20 @@ struct StatusBar: View {
                     .foregroundStyle(.tertiary)
             }
         } else {
-            Text("\(model.items.count) 个项目")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+            if model.isSearching {
+                Text("搜索「\(model.searchQuery)」")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text("· \(model.items.count) 项匹配")
+                    .font(.system(size: 11))
+                    .foregroundStyle(model.items.isEmpty ? Color.secondary : Color.accentColor)
+            } else {
+                Text("\(model.items.count) 个项目")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

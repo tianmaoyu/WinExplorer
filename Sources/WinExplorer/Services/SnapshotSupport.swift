@@ -54,8 +54,15 @@ enum SnapshotSupport {
                         return
                     }
                     if key.hasPrefix("type:") {
-                        // 往当前焦点文本框里输入一段文字（模拟打字，用于地址栏验证）
+                        // 往当前焦点文本框里输入一段文字（模拟打字，用于地址栏/搜索框验证）
                         typeText(String(key.dropFirst("type:".count)))
+                        return
+                    }
+                    if key.hasPrefix("touch:") {
+                        // 在当前目录里造一个文件，用来验证目录监听是否真的会触发自动刷新
+                        let name = String(key.dropFirst("touch:".count))
+                        let url = model.currentURL.appendingPathComponent(name)
+                        FileManager.default.createFile(atPath: url.path, contents: Data("snapshot hook".utf8))
                         return
                     }
                     postKey(key, to: window)
