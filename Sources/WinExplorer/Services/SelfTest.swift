@@ -1448,6 +1448,18 @@ enum SelfTest {
         check("图标：重复取返回同一实例",
               IconProvider.shared.icon(for: txtA) === IconProvider.shared.icon(for: txtA))
 
+        // 读不到属性时要降级成「未授权占位行」，不能静默消失（否则文件夹会看起来是空的）
+        let blockedDir = root.appendingPathComponent("blocked")
+        try? fm.createDirectory(at: blockedDir, withIntermediateDirectories: false)
+        let blockedFile = blockedDir.appendingPathComponent("inside.txt")
+        fm.createFile(atPath: blockedFile.path, contents: Data("x".utf8))
+        try? fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: blockedDir.path)
+        let degraded = FileSystemService.makeItem(for: blockedFile)
+        check("属性读不出来时降级成占位项", degraded != nil)
+        check("降级项标记为未授权", degraded?.access.isDenied == true)
+        check("降级项仍保留文件名", degraded?.name == "inside.txt")
+        try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: blockedDir.path)
+
         // 排序缓存：搜索过滤后再清空，顺序应与直接排序一致
         model.searchText = "small"
         model.searchText = ""

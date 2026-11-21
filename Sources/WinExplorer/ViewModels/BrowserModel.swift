@@ -612,6 +612,9 @@ final class BrowserModel: ObservableObject {
 
     /// 目录读取的代次：连点不同目录时，先发出的那次结果回来会被丢弃（adr/0013）
     private var loadGeneration = 0
+    /// 读取超时看门狗：超时先自动重试一次，再超时就明确报错，绝不静默空列表（adr/0014）
+    private var loadWatchdog: DispatchWorkItem?
+    private var loadAttempts = 0
 
     private func load(directory url: URL, recordHistory: Bool) {
         let standardized = url.standardizedFileURL
@@ -637,6 +640,31 @@ final class BrowserModel: ObservableObject {
                                 directoryChanged: directoryChanged, generation: generation)
             }
         }
+        startLoadWatchdog(generation: generation, url: standardized)
+    }
+
+    /// 读取迟迟不回来时：先自动重试一次，仍然超时就明确报错。
+    /// 没有这道兜底的话，一次卡住的读取会让列表永远停在空 + 转圈。
+    private func startLoadWatchdog(generation: Int, url: URL) {
+        loadWatchdog?.cancel()
+        guard !Self.loadsDirectorySynchronously else { return }
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.isLoadingDirectory, generation == self.loadGeneration else { return }
+            self.loadAttempts += 1
+            if self.loadAttempts <= 1 {
+                self.load(directory: url, recordHistory: false)
+            } else {
+                self.loadAttempts = 0
+                self.isLoadingDirectory = false
+                self.errorMessage = L(
+                    "读取「\(url.lastPathComponent)」超时，请重试",
+                    "Timed out reading “\(url.lastPathComponent)” — try again"
+                )
+            }
+        }
+        loadWatchdog = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: work)
     }
 
     /// 读取结果回到主线程后的落地：代次不符说明用户已经切走了，整包丢弃
@@ -647,11 +675,18 @@ final class BrowserModel: ObservableObject {
         directoryChanged: Bool,
         generation: Int
     ) {
-        guard generation == loadGeneration else { return }
+        guard generation == loadGeneration else {
+            logLoad("丢弃过期结果", url: url, count: nil, generation: generation)
+            return
+        }
         isLoadingDirectory = false
+        loadWatchdog?.cancel()
+        loadWatchdog = nil
+        loadAttempts = 0
 
         switch result {
         case .success(let loaded):
+            logLoad("应用结果", url: url, count: loaded.count, generation: generation)
             if recordHistory, url != currentURL {
                 backStack.append(currentURL)
                 forwardStack.removeAll()
@@ -688,6 +723,13 @@ final class BrowserModel: ObservableObject {
                 errorMessage = L("无法打开「\(url.lastPathComponent)」：\(error.localizedDescription)", "Can’t open “\(url.lastPathComponent)”: \(error.localizedDescription)")
             }
         }
+    }
+
+    /// 目录读取诊断日志：`WINEXPLORER_LOAD_DEBUG=1` 时打印，偶发空白问题时用得上
+    private func logLoad(_ action: String, url: URL, count: Int?, generation: Int) {
+        guard ProcessInfo.processInfo.environment["WINEXPLORER_LOAD_DEBUG"] == "1" else { return }
+        let items = count.map { "items=\($0)" } ?? "items=—"
+        print("[Load] gen=\(generation)/\(loadGeneration) \(action) \(url.path) \(items)")
     }
 
     /// 排序结果缓存：过滤（隐藏项 / 搜索词）不改变相对顺序，所以

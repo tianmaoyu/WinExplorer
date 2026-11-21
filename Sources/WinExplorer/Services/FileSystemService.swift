@@ -43,9 +43,16 @@ enum FileSystemService {
         return result
     }
 
+    /// 造一行列表项。**永不返回 nil**：属性读不出来时降级成「未授权」占位项。
+    ///
+    /// 这里曾经返回 nil，`contents` 用 compactMap 过滤 —— 一旦某项的
+    /// `resourceValues` 抛错（TCC 未授权、目录权限不足、网络卷瞬间掉线），
+    /// 那一项就被静默丢掉；赶上整层都读不出来，文件夹就"看起来是空的"，
+    /// 用户既没有错误提示也没法授权。降级成占位项后：能看到「有这么个东西 + 锁」，
+    /// 点它会走已有的授权流程。
     static func makeItem(for url: URL) -> FileItem? {
         guard let values = try? url.resourceValues(forKeys: resourceKeySet) else {
-            return nil
+            return degradedItem(for: url)
         }
 
         let isDirectory = values.isDirectory ?? false
@@ -64,6 +71,25 @@ enum FileSystemService {
             modified: values.contentModificationDate,
             kind: kindDescription(url: url, isDirectory: isDirectory, isPackage: isPackage),
             access: access
+        )
+    }
+
+    /// 属性读不出来时的降级项：名称取路径最后一段，类型未知，标记为未授权。
+    /// 目录与否能 stat 就用 stat，stat 也失败就按文件画（比"消失"诚实）。
+    private static func degradedItem(for url: URL) -> FileItem {
+        var isDirectory: ObjCBool = false
+        let statted = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+        let name = url.lastPathComponent
+        return FileItem(
+            url: url,
+            name: name.isEmpty ? url.path : name,
+            isDirectory: statted && isDirectory.boolValue,
+            isPackage: false,
+            isHidden: name.hasPrefix("."),
+            size: nil,
+            modified: nil,
+            kind: L("无法读取", "Unreadable"),
+            access: .denied
         )
     }
 

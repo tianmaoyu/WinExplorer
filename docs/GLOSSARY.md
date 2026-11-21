@@ -90,3 +90,5 @@
 | **读取代次** | 每次 `load` 自增的序号；结果回到主线程时序号不符就整包丢弃，避免连点目录时旧结果覆盖新结果 | `BrowserModel.loadGeneration`（adr/0013） |
 | **待揭示 URL** | 压缩/解压完成后要选中的产物；目录异步读，读完前列表里还没有它，先记下、读完后补选中 | `BrowserModel.pendingRevealURL` |
 | **加载态** | 目录正在后台读取时状态栏的小转圈与「正在读取…」 | `BrowserModel.isLoadingDirectory` |
+| **降级项** | 属性读不出来（TCC/权限/卷异常）时的占位行：保留文件名、标为未授权、类型显示「无法读取」，绝不让行静默消失 | `FileSystemService.degradedItem`（adr/0014） |
+| **读取看门狗** | 每次目录读取起的 5s 定时器：超时自动重试一次，再超时给出错误，避免永远停在空列表+转圈 | `BrowserModel.startLoadWatchdog` |
