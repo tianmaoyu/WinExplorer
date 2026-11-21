@@ -7,6 +7,10 @@ struct WinExplorerApp: App {
     @StateObject private var tabs = TabsModel()
 
     init() {
+        // 截图验收用：WINEXPLORER_APPEARANCE=dark|light 强制外观，默认跟随系统
+        if let forced = ProcessInfo.processInfo.environment["WINEXPLORER_APPEARANCE"] {
+            NSApplication.shared.appearance = NSAppearance(named: forced == "dark" ? .darkAqua : .aqua)
+        }
         if ProcessInfo.processInfo.environment["WINEXPLORER_SELFTEST"] == "1" {
             SelfTest.runAll()
         }

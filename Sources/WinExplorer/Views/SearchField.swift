@@ -22,8 +22,9 @@ struct SearchField: NSViewRepresentable {
         field.placeholderString = placeholder
         field.sendsWholeSearchString = false
         field.sendsSearchStringImmediately = true
-        field.controlSize = .small
-        field.font = .systemFont(ofSize: 12)
+        // .large + 12.5pt 让搜索框和地址栏容器同高（都 28），视觉上是一套控件
+        field.controlSize = .large
+        field.font = .systemFont(ofSize: 12.5)
         field.bezelStyle = .roundedBezel
         field.focusRingType = .default
         field.stringValue = text
@@ -37,6 +38,10 @@ struct SearchField: NSViewRepresentable {
         context.coordinator.parent = self
         if field.stringValue != text {
             field.stringValue = text
+        }
+        // 占位文案跟着当前目录名走（「搜索 下载」），切目录后要跟着换
+        if field.placeholderString != placeholder {
+            field.placeholderString = placeholder
         }
         if context.coordinator.lastFocusToken != focusToken, let token = focusToken {
             context.coordinator.lastFocusToken = token
