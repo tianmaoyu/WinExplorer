@@ -79,7 +79,7 @@ WinExplorer 是一个原生 macOS 应用：在该像资源管理器的地方像�
 ## 构建与运行
 
 ```bash
-git clone https://github.com/<your-name>/WinExplorer.git
+git clone https://github.com/tianmaoyu/WinExplorer.git
 cd WinExplorer
 
 # 构建 .app 到 build/

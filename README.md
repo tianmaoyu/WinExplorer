@@ -89,7 +89,7 @@ shows the full path of the selection:
 ## Build and run
 
 ```bash
-git clone https://github.com/<your-name>/WinExplorer.git
+git clone https://github.com/tianmaoyu/WinExplorer.git
 cd WinExplorer
 
 # Build a .app bundle into build/
