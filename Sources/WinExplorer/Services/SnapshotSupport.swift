@@ -11,6 +11,9 @@ enum SnapshotSupport {
     /// 由根视图在出现时调用，把模型交给截图脚本使用（支持 nav:/路径 这类开发指令）。
     /// 传了 tabs 时，所有指令都作用于「当前标签」，并额外支持 tab: 开头的标签指令。
     static func scheduleIfNeeded(model: BrowserModel, tabs: TabsModel? = nil) {
+        // 标签样式对比图：WINEXPLORER_TAB_COMPARE=/path.png，独立对比窗口截图后退出
+        if TabStyleCompare.runIfNeeded() { return }
+
         let env = ProcessInfo.processInfo.environment
         guard env["WINEXPLORER_SNAPSHOT"] != nil else { return }
         guard !hasScheduled else { return }
@@ -240,6 +243,12 @@ enum SnapshotSupport {
         // 验收工具栏（如标签栏）时用 WINEXPLORER_SNAPSHOT_FULL=1 抓整个窗口视图
         if ProcessInfo.processInfo.environment["WINEXPLORER_SNAPSHOT_FULL"] == "1",
            let fullView = window.contentView?.superview {
+            // 强制走完绘制事务：工具栏 item 是 layer 宿主，布局更新后不画一遍
+            // 会抓到「item 在、像素空」的空壳图；被别的窗口挡住时 layer 也可能
+            // 没进绘制事务，先前置再画
+            window.orderFrontRegardless()
+            window.layoutIfNeeded()
+            window.displayIfNeeded()
             if capture(view: fullView, to: path) {
                 // 渲染过窗口 chrome 后 NSApp.terminate 会卡在绘制事务里被外层杀掉
                 //（exit 137），截图模式本来就用于自退，直接退出

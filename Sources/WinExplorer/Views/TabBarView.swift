@@ -137,14 +137,14 @@ private struct TabChip: View {
                 .help(L("关闭标签页（⌘W）", "Close Tab (⌘W)"))
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, TabCardShape.horizontalPadding(for: .current))
         .padding(.vertical, 4)
         .background {
-            RoundedRectangle(cornerRadius: 6)
+            TabCardShape()
                 .fill(background)
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 6)
+            TabCardShape()
                 .stroke(strokeColor, lineWidth: 1)
         }
         .compositingGroup()
@@ -172,6 +172,91 @@ private struct TabChip: View {
         if isFileDropTarget { return Color.accentColor }
         if isActive { return Color.primary.opacity(0.10) }
         return .clear
+    }
+}
+
+// MARK: - 标签卡形状
+
+/// 标签卡的视觉风格：圆角卡片（默认）或 Win11 梯形切角（adr/0009 试验）。
+/// 用 `WINEXPLORER_TAB_STYLE=card|trapezoid` 切换，供截图对比两种形态。
+enum TabCardStyle {
+    case card, trapezoid
+
+    static let current: TabCardStyle = {
+        ProcessInfo.processInfo.environment["WINEXPLORER_TAB_STYLE"] == "trapezoid"
+            ? .trapezoid : .card
+    }()
+}
+
+/// 标签卡轮廓：圆角矩形或 Win11 梯形切角。
+///
+/// Win11 的标签形状（`trapezoid`）：上边两个圆角，左右侧边垂直，
+/// 到底部向外撇出一个脚，衔接处是一段**凹**圆角 —— 切点处切线分别
+/// 与竖边、底边相切，正是 Win11 TabView 的 profile。
+struct TabCardShape: Shape {
+    /// 样式可显式指定（对比视图要同时渲染两种），默认跟随全局设置
+    var style: TabCardStyle = .current
+
+    /// 内容到卡边缘的左右留白：梯形需要给外撇的脚留出空间
+    static func horizontalPadding(for style: TabCardStyle) -> CGFloat {
+        style == .trapezoid ? 15 : 8
+    }
+
+    /// 上方圆角
+    private let topRadius: CGFloat = 6
+    /// 底部凹圆角半径（控制外撇的缓急）
+    private let fillet: CGFloat = 7
+    /// 底部外撇量（脚比竖边宽出多少）
+    private let splay: CGFloat = 9
+
+    func path(in rect: CGRect) -> Path {
+        switch style {
+        case .card:
+            return RoundedRectangle(cornerRadius: 6).path(in: rect)
+        case .trapezoid:
+            return trapezoidPath(in: rect)
+        }
+    }
+
+    private func trapezoidPath(in rect: CGRect) -> Path {
+        let minX = rect.minX, maxX = rect.maxX
+        let minY = rect.minY, maxY = rect.maxY
+        let left = minX + splay          // 左侧竖边
+        let right = maxX - splay         // 右侧竖边
+        let bottomFilletY = maxY - fillet
+
+        var p = Path()
+        // 顶边（左圆角 → 右圆角）
+        p.move(to: CGPoint(x: left + topRadius, y: minY))
+        p.addLine(to: CGPoint(x: right - topRadius, y: minY))
+        p.addArc(
+            center: CGPoint(x: right - topRadius, y: minY + topRadius),
+            radius: topRadius,
+            startAngle: .degrees(-90), endAngle: .degrees(0), clockwise: false
+        )
+        // 右侧竖边向下，到凹圆角起点
+        p.addLine(to: CGPoint(x: right, y: bottomFilletY))
+        // 凹圆角外撇到右脚（切线：竖 → 横）
+        p.addQuadCurve(
+            to: CGPoint(x: maxX, y: maxY),
+            control: CGPoint(x: right, y: maxY)
+        )
+        // 底边
+        p.addLine(to: CGPoint(x: minX, y: maxY))
+        // 左脚凹圆角收回竖边
+        p.addQuadCurve(
+            to: CGPoint(x: left, y: bottomFilletY),
+            control: CGPoint(x: left, y: maxY)
+        )
+        // 左侧竖边向上，闭合到顶边左圆角
+        p.addLine(to: CGPoint(x: left, y: minY + topRadius))
+        p.addArc(
+            center: CGPoint(x: left + topRadius, y: minY + topRadius),
+            radius: topRadius,
+            startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false
+        )
+        p.closeSubpath()
+        return p
     }
 }
 
