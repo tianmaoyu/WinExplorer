@@ -12,7 +12,15 @@ struct BrowserView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .toolbar { toolbarContent }
-        .onAppear { SnapshotSupport.scheduleIfNeeded(model: model) }
+        .onAppear {
+            SnapshotSupport.scheduleIfNeeded(model: model)
+            installDragSource()
+            ShortcutMonitor.shared.install(
+                isBlocked: { model.pendingPermanentDelete != nil },
+                onUndo: { model.undo() },
+                onRedo: { model.redo() }
+            )
+        }
         .overlay {
             if let targets = model.pendingPermanentDelete {
                 DeleteConfirmView(
@@ -78,6 +86,25 @@ struct BrowserView: View {
         .background(Color.orange.opacity(0.12))
     }
 
+    // MARK: - 拖拽
+
+    /// 拖拽由 AppKit 会话发起（见 DragSupport），这里告诉它「这一次要拖哪些文件」
+    private func installDragSource() {
+        DragCoordinator.shared.install()
+        DragCoordinator.shared.resolveURLs = { url, _ in
+            if model.selection.contains(url), model.dragURLs.count > 0 {
+                return model.dragURLs
+            }
+            // 拖未选中的行：先选中它，再只拖这一个（与 Windows 一致）
+            if let item = model.items.first(where: {
+                $0.url.standardizedFileURL.path == url.standardizedFileURL.path
+            }) {
+                model.selectOnly(item)
+            }
+            return [url]
+        }
+    }
+
     // MARK: - 键盘
 
     /// 返回 true 表示事件已被消费。
@@ -130,6 +157,19 @@ struct BrowserView: View {
                 model.moveSelectionToTrash()
             }
             return true
+        }
+
+        // Z = 撤销 / ⇧Z 重做，同样兼容 Command 被重映射后的 fn / ⌥ 版本
+        if event.keyCode == 6 {
+            let undoFlags: NSEvent.ModifierFlags = [.command, .function, .option]
+            if !flags.intersection(undoFlags).isEmpty, !flags.contains(.control) {
+                if flags.contains(.shift) {
+                    model.redo()
+                } else {
+                    model.undo()
+                }
+                return true
+            }
         }
 
         let reserved: NSEvent.ModifierFlags = [.command, .control, .option]

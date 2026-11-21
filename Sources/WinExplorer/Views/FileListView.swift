@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// 表头与数据行共用同一套列骨架，保证任何屏幕上都不会错列。
 enum FileListLayout {
@@ -35,6 +36,8 @@ enum FileListLayout {
 /// Windows 资源管理器式的"详细信息"列表：表头可排序，行可多选、可双击打开。
 struct FileListView: View {
     @ObservedObject var model: BrowserModel
+    /// 拖到列表空白处 = 拖进当前文件夹
+    @State private var emptyAreaTargeted = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -49,6 +52,16 @@ struct FileListView: View {
                             }
                             .contextMenu {
                                 emptyAreaMenu
+                            }
+                            .onDrop(
+                                of: [UTType.fileURL],
+                                isTargeted: $emptyAreaTargeted
+                            ) { providers in
+                                DropSupport.loadURLs(from: providers) { urls in
+                                    guard !urls.isEmpty else { return }
+                                    model.drop(urls: urls, into: model.currentURL, modifiers: NSEvent.modifierFlags)
+                                }
+                                return true
                             }
 
                         LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
@@ -74,6 +87,13 @@ struct FileListView: View {
                     guard let request else { return }
                     withAnimation(.easeOut(duration: 0.12)) {
                         proxy.scrollTo(request.url, anchor: nil)
+                    }
+                }
+                .overlay {
+                    if emptyAreaTargeted {
+                        RoundedRectangle(cornerRadius: 2)
+                            .stroke(Color.accentColor, lineWidth: 2)
+                            .allowsHitTesting(false)
                     }
                 }
             }
@@ -133,6 +153,7 @@ struct FileListView: View {
             isSelected: model.selection.contains(item.url) && !renaming,
             isRenaming: renaming,
             isCut: model.cutURLs.contains(item.url),
+            isDropTarget: model.isDropTarget(item.url),
             onCommitRename: { newName in
                 let ok = model.commitRename(newName)
                 if ok {
@@ -147,6 +168,8 @@ struct FileListView: View {
         )
         .frame(height: FileListLayout.rowHeight)
         .contentShape(Rectangle())
+        // 拖拽发起用的命中探针（不参与点击）
+        .background(RowProbe(url: item.url))
 
         if renaming {
             base
@@ -165,6 +188,7 @@ struct FileListView: View {
                 .contextMenu {
                     contextMenu(for: item)
                 }
+                .modifier(FolderDropModifier(model: model, item: item))
         }
     }
 
@@ -269,12 +293,47 @@ struct FileListView: View {
     }
 }
 
+/// 只有文件夹行接受拖放；拖到文件行上不做任何事。
+private struct FolderDropModifier: ViewModifier {
+    @ObservedObject var model: BrowserModel
+    let item: FileItem
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if item.isFolderLike {
+            content.onDrop(of: [UTType.fileURL], isTargeted: targeted) { providers in
+                DropSupport.loadURLs(from: providers) { urls in
+                    guard !urls.isEmpty else { return }
+                    model.drop(urls: urls, into: item.url, modifiers: NSEvent.modifierFlags)
+                }
+                return true
+            }
+        } else {
+            content
+        }
+    }
+
+    private var targeted: Binding<Bool> {
+        Binding(
+            get: { model.isDropTarget(item.url) },
+            set: { isTargeted in
+                if isTargeted {
+                    model.dropTargetURL = item.url
+                } else if model.isDropTarget(item.url) {
+                    model.dropTargetURL = nil
+                }
+            }
+        )
+    }
+}
+
 /// 单行。列宽/内边距全部来自 FileListLayout，和表头严格对齐。
 struct FileRow: View {
     let item: FileItem
     let isSelected: Bool
     var isRenaming: Bool = false
     var isCut: Bool = false
+    var isDropTarget: Bool = false
     var onCommitRename: (String) -> Bool = { _ in false }
     var onCancelRename: () -> Void = {}
 
@@ -336,6 +395,16 @@ struct FileRow: View {
         }
         // 剪切中的项整体变淡，和 Windows 的"待移动"观感一致
         .opacity(isCut ? 0.5 : 1)
+        .overlay {
+            if isDropTarget {
+                RoundedRectangle(cornerRadius: 4)
+                    // 行被选中时底色就是强调色，描边改成白色并往里缩一点才看得见
+                    .stroke(isSelected ? Color.white : Color.accentColor, lineWidth: 2)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .allowsHitTesting(false)
+            }
+        }
         .onHover { hovered = $0 }
     }
 

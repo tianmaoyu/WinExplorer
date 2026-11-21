@@ -44,6 +44,15 @@ enum SnapshotSupport {
                         model.navigate(to: URL(fileURLWithPath: target))
                         return
                     }
+                    if key.hasPrefix("drag:") {
+                        dryRunDrag(path: String(key.dropFirst("drag:".count)), window: window)
+                        return
+                    }
+                    if key.hasPrefix("drop:") {
+                        // 手动点亮某个落点，用于截图确认拖拽高亮
+                        model.dropTargetURL = URL(fileURLWithPath: String(key.dropFirst("drop:".count)))
+                        return
+                    }
                     postKey(key, to: window)
                 }
             }
@@ -55,6 +64,36 @@ enum SnapshotSupport {
                 capture(window: window, to: path)
             }
         }
+    }
+
+    /// 在指定行上模拟"按下 + 拖动"，配合 WINEXPLORER_DRAG_DRYRUN=1 验证拖拽发起逻辑
+    private static func dryRunDrag(path: String, window: NSWindow) {
+        let url = URL(fileURLWithPath: path)
+        guard let frame = RowProbeRegistry.shared.windowFrame(for: url) else {
+            FileHandle.standardError.write(Data("snapshot: 找不到行 \(path)\n".utf8))
+            return
+        }
+
+        let start = NSPoint(x: frame.midX, y: frame.midY)
+        sendMouse(.leftMouseDown, at: start, window: window)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            sendMouse(.leftMouseDragged, at: NSPoint(x: start.x + 14, y: start.y + 14), window: window)
+        }
+    }
+
+    private static func sendMouse(_ type: NSEvent.EventType, at point: NSPoint, window: NSWindow) {
+        guard let event = NSEvent.mouseEvent(
+            with: type,
+            location: point,
+            modifierFlags: NSEvent.modifierFlags,
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        ) else { return }
+        NSApp.sendEvent(event)
     }
 
     private static func capture(window: NSWindow, to path: String) {

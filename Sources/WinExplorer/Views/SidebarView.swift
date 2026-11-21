@@ -1,8 +1,11 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SidebarView: View {
     @ObservedObject var model: BrowserModel
+    /// 拖拽悬停中的侧边栏位置
+    @State private var targetedPlace: URL?
 
     private let quickPlaces = Place.quickPlaces
     private let volumes = Place.volumes
@@ -62,5 +65,30 @@ struct SidebarView: View {
                 .frame(width: 15, height: 15)
         }
         .tag(place.url)
+        .listRowBackground(
+            targetedPlace == place.url
+                ? Color.accentColor.opacity(0.18)
+                : Color.clear
+        )
+        .onDrop(of: [UTType.fileURL], isTargeted: targetedBinding(for: place.url)) { providers in
+            DropSupport.loadURLs(from: providers) { urls in
+                guard !urls.isEmpty else { return }
+                model.drop(urls: urls, into: place.url, modifiers: NSEvent.modifierFlags)
+            }
+            return true
+        }
+    }
+
+    private func targetedBinding(for url: URL) -> Binding<Bool> {
+        Binding(
+            get: { targetedPlace == url },
+            set: { isTargeted in
+                if isTargeted {
+                    targetedPlace = url
+                } else if targetedPlace == url {
+                    targetedPlace = nil
+                }
+            }
+        )
     }
 }

@@ -5,6 +5,29 @@ struct ExplorerCommands: Commands {
     @ObservedObject var model: BrowserModel
 
     var body: some Commands {
+        CommandGroup(replacing: .undoRedo) {
+            Button(model.undoTitle.map { "撤销\($0)" } ?? "撤销") {
+                // 正在重命名时，⌘Z 应该撤销文字编辑
+                if let editor = model.textEditor, let undoManager = editor.undoManager {
+                    undoManager.undo()
+                } else {
+                    model.undo()
+                }
+            }
+            .keyboardShortcut("z", modifiers: .command)
+            .disabled(!model.canUndo)
+
+            Button(model.redoTitle.map { "重做\($0)" } ?? "重做") {
+                if let editor = model.textEditor, let undoManager = editor.undoManager {
+                    undoManager.redo()
+                } else {
+                    model.redo()
+                }
+            }
+            .keyboardShortcut("z", modifiers: [.command, .shift])
+            .disabled(!model.canRedo)
+        }
+
         CommandGroup(replacing: .newItem) {
             Button("新建文件夹") {
                 model.createFolder()

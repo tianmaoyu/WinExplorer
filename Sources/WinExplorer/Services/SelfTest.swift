@@ -337,6 +337,156 @@ enum SelfTest {
         check("目标是文件时拒绝粘贴", model.errorMessage != nil)
         model.dismissError()
 
+        // MARK: 撤销 / 重做
+        let undoSrc = root.appendingPathComponent("撤销源")
+        let undoDst = root.appendingPathComponent("撤销目标")
+        try? fm.createDirectory(at: undoSrc, withIntermediateDirectories: false)
+        try? fm.createDirectory(at: undoDst, withIntermediateDirectories: false)
+        fm.createFile(atPath: undoSrc.appendingPathComponent("原稿.txt").path, contents: Data("D".utf8))
+
+        model.navigate(to: undoSrc)
+        model.reload()
+
+        // 重命名 → 撤销 → 重做
+        if let draft = model.items.first(where: { $0.name == "原稿.txt" }) {
+            model.beginRename(item: draft)
+            _ = model.commitRename("定稿.txt")
+            check("重命名后新名字存在",
+                  fm.fileExists(atPath: undoSrc.appendingPathComponent("定稿.txt").path))
+            check("重命名进入撤销栈",
+                  model.canUndo && (model.undoTitle?.contains("重命名") ?? false),
+                  "undoTitle=\(model.undoTitle ?? "nil")")
+
+            model.undo()
+            check("撤销重命名恢复原名",
+                  fm.fileExists(atPath: undoSrc.appendingPathComponent("原稿.txt").path))
+            check("撤销后可重做", model.canRedo)
+
+            model.redo()
+            check("重做重命名",
+                  fm.fileExists(atPath: undoSrc.appendingPathComponent("定稿.txt").path))
+        } else {
+            check("重命名进入撤销栈", false, "找不到原稿.txt")
+        }
+
+        // 新建文件夹 → 撤销 → 重做
+        model.createFolder()
+        let createdFolder = undoSrc.appendingPathComponent("新建文件夹")
+        check("新建文件夹进入撤销栈", model.canUndo && fm.fileExists(atPath: createdFolder.path))
+        model.undo()
+        check("撤销新建文件夹", !fm.fileExists(atPath: createdFolder.path))
+        model.redo()
+        check("重做新建文件夹", fm.fileExists(atPath: createdFolder.path))
+        try? fm.removeItem(at: createdFolder)
+
+        // 复制 → 撤销（删掉副本）→ 重做
+        model.reload()
+        if let source = model.items.first(where: { $0.name == "定稿.txt" }) {
+            model.focus(url: source.url)
+            model.copySelection()
+            model.paste()
+            let copyURL = undoSrc.appendingPathComponent("定稿 副本.txt")
+            check("复制生成副本", fm.fileExists(atPath: copyURL.path))
+
+            model.undo()
+            check("撤销复制删除副本", !fm.fileExists(atPath: copyURL.path))
+            check("撤销复制不动原文件",
+                  fm.fileExists(atPath: undoSrc.appendingPathComponent("定稿.txt").path))
+            model.redo()
+            check("重做复制", fm.fileExists(atPath: copyURL.path))
+            try? fm.removeItem(at: copyURL)
+        }
+
+        // 剪切粘贴（跨目录移动）→ 撤销 → 重做
+        fm.createFile(atPath: undoSrc.appendingPathComponent("搬走.txt").path, contents: Data("M".utf8))
+        model.reload()
+        if let item = model.items.first(where: { $0.name == "搬走.txt" }) {
+            model.focus(url: item.url)
+            model.cutSelection()
+            model.paste(into: undoDst)
+            check("剪切后离开源目录",
+                  !fm.fileExists(atPath: undoSrc.appendingPathComponent("搬走.txt").path))
+            check("剪切后到达目标目录",
+                  fm.fileExists(atPath: undoDst.appendingPathComponent("搬走.txt").path))
+
+            model.undo()
+            check("撤销移动回到原处",
+                  fm.fileExists(atPath: undoSrc.appendingPathComponent("搬走.txt").path))
+            check("撤销移动清掉目标位置",
+                  !fm.fileExists(atPath: undoDst.appendingPathComponent("搬走.txt").path))
+            model.redo()
+            check("重做移动",
+                  fm.fileExists(atPath: undoDst.appendingPathComponent("搬走.txt").path))
+
+            // 新操作要清空重做栈
+            model.undo()
+            check("撤销后重做栈可用", model.canRedo)
+            model.createFolder()
+            check("新操作清空重做栈", !model.canRedo)
+            if let extra = model.items.first(where: { $0.name == "新建文件夹" }) {
+                try? fm.removeItem(at: extra.url)
+            }
+        }
+
+        // MARK: 拖放
+        let dropSrc = root.appendingPathComponent("拖放源")
+        let dropDst = root.appendingPathComponent("拖放目标")
+        try? fm.createDirectory(at: dropSrc, withIntermediateDirectories: false)
+        try? fm.createDirectory(at: dropDst, withIntermediateDirectories: false)
+        try? fm.createDirectory(at: dropSrc.appendingPathComponent("内层"), withIntermediateDirectories: false)
+        let dragged = dropSrc.appendingPathComponent("拖我.txt")
+        fm.createFile(atPath: dragged.path, contents: Data("T".utf8))
+        model.navigate(to: dropSrc)
+        model.reload()
+
+        // 同卷、无修饰键 → 移动
+        model.drop(urls: [dragged], into: dropDst, modifiers: [])
+        check("拖到别的文件夹是移动",
+              !fm.fileExists(atPath: dragged.path)
+                && fm.fileExists(atPath: dropDst.appendingPathComponent("拖我.txt").path))
+        model.undo()
+        check("撤销拖放后文件回来", fm.fileExists(atPath: dragged.path))
+
+        // ⌥ 拖 → 复制（原文件保留）
+        model.drop(urls: [dragged], into: dropDst, modifiers: [.option])
+        check("⌥ 拖拽是复制",
+              fm.fileExists(atPath: dragged.path)
+                && fm.fileExists(atPath: dropDst.appendingPathComponent("拖我.txt").path))
+
+        // 同名再移动 → 拒绝，两边都在
+        model.dismissError()
+        model.drop(urls: [dragged], into: dropDst, modifiers: [])
+        check("同名拖放被拒绝", model.errorMessage != nil)
+        check("拒绝时不动文件", fm.fileExists(atPath: dragged.path))
+        model.dismissError()
+
+        // 拖进自己的子目录 → 拒绝
+        model.drop(urls: [dropSrc], into: dropSrc.appendingPathComponent("内层"), modifiers: [])
+        check("禁止拖进自己的子目录", model.errorMessage != nil)
+        model.dismissError()
+
+        // 拖回原处（无修饰键）→ 什么都不做
+        model.drop(urls: [dragged], into: dropSrc, modifiers: [])
+        check("拖回原处不产生副本",
+              fm.fileExists(atPath: dragged.path)
+                && !fm.fileExists(atPath: dropSrc.appendingPathComponent("拖我 副本.txt").path))
+
+        // onDrop 拿到的 provider 里必须是可解析的文件 URL，否则拖放会静默失效
+        var resolved: [URL] = []
+        var resolvedReady = false
+        let provider = NSItemProvider(item: dragged as NSURL, typeIdentifier: "public.file-url")
+        DropSupport.loadURLs(from: [provider]) { urls in
+            resolved = urls
+            resolvedReady = true
+        }
+        let deadline = Date().addingTimeInterval(2)
+        while !resolvedReady, Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+        }
+        check("拖拽 provider 能解析出文件 URL",
+              resolved.first?.standardizedFileURL.path == dragged.standardizedFileURL.path,
+              "解析到 \(resolved.map(\.lastPathComponent))")
+
         let before = model.currentURL
         model.navigate(to: root.appendingPathComponent("no-such-dir"))
         check("打不开的目录给出提示而不是崩溃",
