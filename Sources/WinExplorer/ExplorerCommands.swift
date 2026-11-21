@@ -21,6 +21,26 @@ struct ExplorerCommands: Commands {
             }
             .keyboardShortcut("o", modifiers: .command)
             .disabled(!model.hasSelection)
+
+            Divider()
+
+            Button("重命名…") {
+                model.beginRename()
+            }
+            .keyboardShortcut(KeyEquivalent("\u{F705}"), modifiers: [])
+            .disabled(model.selection.count != 1)
+
+            Button("移到废纸篓") {
+                model.moveSelectionToTrash()
+            }
+            .keyboardShortcut(KeyEquivalent("\u{8}"), modifiers: .command)
+            .disabled(!model.hasSelection)
+
+            Button("彻底删除…") {
+                model.requestPermanentDelete()
+            }
+            .keyboardShortcut(KeyEquivalent("\u{8}"), modifiers: [.command, .shift])
+            .disabled(!model.hasSelection)
         }
 
         CommandGroup(after: .pasteboard) {

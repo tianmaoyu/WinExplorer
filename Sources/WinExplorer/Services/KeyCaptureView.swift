@@ -14,8 +14,11 @@ final class FocusKeeper {
         self.view = view
     }
 
-    func reclaim() {
+    func reclaim(force: Bool = false) {
         guard let view, let window = view.window else { return }
+        // 正在文本框里编辑时不要抢焦点（否则打字会中断）；
+        // force = true 用于点击列表时主动结束编辑、触发失焦提交。
+        if !force, window.firstResponder is NSTextView { return }
         if window.firstResponder !== view {
             window.makeFirstResponder(view)
         }

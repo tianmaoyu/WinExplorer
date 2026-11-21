@@ -121,23 +121,47 @@ struct FileListView: View {
 
     // MARK: - 行
 
+    @ViewBuilder
     private func row(for item: FileItem) -> some View {
-        FileRow(item: item, isSelected: model.selection.contains(item.url))
-            .frame(height: FileListLayout.rowHeight)
-            .contentShape(Rectangle())
-            .onTapGesture(count: 2) {
-                model.open(item)
-            }
-            .simultaneousGesture(
-                TapGesture(count: 1).onEnded {
-                    // 点击后把键盘焦点拿回来，否则方向键会失效
-                    FocusKeeper.shared.reclaim()
-                    model.handleClick(on: item, modifiers: NSEvent.modifierFlags)
+        let renaming = model.renamingURL == item.url
+
+        let base = FileRow(
+            item: item,
+            isSelected: model.selection.contains(item.url) && !renaming,
+            isRenaming: renaming,
+            onCommitRename: { newName in
+                let ok = model.commitRename(newName)
+                if ok {
+                    DispatchQueue.main.async { FocusKeeper.shared.reclaim() }
                 }
-            )
-            .contextMenu {
-                contextMenu(for: item)
+                return ok
+            },
+            onCancelRename: {
+                model.cancelRename()
+                DispatchQueue.main.async { FocusKeeper.shared.reclaim() }
             }
+        )
+        .frame(height: FileListLayout.rowHeight)
+        .contentShape(Rectangle())
+
+        if renaming {
+            base
+        } else {
+            base
+                .onTapGesture(count: 2) {
+                    model.open(item)
+                }
+                .simultaneousGesture(
+                    TapGesture(count: 1).onEnded {
+                        // 点击后把键盘焦点拿回来（正在重命名时先结束编辑再拿）
+                        FocusKeeper.shared.reclaim(force: true)
+                        model.handleClick(on: item, modifiers: NSEvent.modifierFlags)
+                    }
+                )
+                .contextMenu {
+                    contextMenu(for: item)
+                }
+        }
     }
 
     @ViewBuilder
@@ -155,12 +179,26 @@ struct FileListView: View {
             model.revealInFinder(item)
         }
         Divider()
-        Button(inSelection && model.selection.count > 1 ? "复制 \(model.selection.count) 项路径" : "复制路径") {
-            if inSelection && model.selection.count > 1 {
+        Button("重命名…") {
+            model.beginRename(item: item)
+        }
+        if inSelection && model.selection.count > 1 {
+            Button("复制 \(model.selection.count) 项路径") {
                 model.copySelectedPaths()
-            } else {
+            }
+        } else {
+            Button("复制路径") {
                 model.copyPath(item)
             }
+        }
+        Divider()
+        Button("移到废纸篓") {
+            if !inSelection { model.selectOnly(item) }
+            model.moveSelectionToTrash()
+        }
+        Button("彻底删除…") {
+            if !inSelection { model.selectOnly(item) }
+            model.requestPermanentDelete()
         }
         Divider()
         Button("刷新") {
@@ -187,6 +225,9 @@ struct FileListView: View {
 struct FileRow: View {
     let item: FileItem
     let isSelected: Bool
+    var isRenaming: Bool = false
+    var onCommitRename: (String) -> Bool = { _ in false }
+    var onCancelRename: () -> Void = {}
 
     @State private var hovered = false
 
@@ -197,12 +238,33 @@ struct FileRow: View {
                     .resizable()
                     .interpolation(.high)
                     .frame(width: 16, height: 16)
-                Text(item.name)
-                    .font(.system(size: 13))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .foregroundStyle(isSelected ? Color.white : Color.primary)
-                Spacer(minLength: 0)
+
+                if isRenaming {
+                    RenameField(
+                        text: item.name,
+                        selectionLength: Self.baseNameLength(of: item.name),
+                        onCommit: onCommitRename,
+                        onCancel: onCancelRename
+                    )
+                    .frame(height: 18)
+                    .padding(.horizontal, 3)
+                    .background {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(Color(nsColor: .textBackgroundColor))
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 3)
+                            .stroke(Color.accentColor, lineWidth: 1.5)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Text(item.name)
+                        .font(.system(size: 13))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .foregroundStyle(isSelected ? Color.white : Color.primary)
+                    Spacer(minLength: 0)
+                }
             }
         } size: {
             Text(item.sizeText)
@@ -224,6 +286,15 @@ struct FileRow: View {
                 .padding(.horizontal, 4)
         }
         .onHover { hovered = $0 }
+    }
+
+    /// 主文件名长度（不含扩展名），重命名时默认只选中这一段
+    static func baseNameLength(of name: String) -> Int {
+        let nsName = name as NSString
+        guard !nsName.pathExtension.isEmpty else { return nsName.length }
+        let base = nsName.deletingPathExtension
+        guard !base.isEmpty else { return nsName.length }
+        return (base as NSString).length
     }
 
     private var secondaryColor: Color {

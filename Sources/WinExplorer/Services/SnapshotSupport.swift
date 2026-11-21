@@ -30,30 +30,45 @@ enum SnapshotSupport {
                 return
             }
 
-            for key in keys {
-                postKey(key, to: window)
+            // 逐个按键发送并留出间隔：像 F2 打开输入框这类操作需要等 UI 更新、焦点转移完成
+            for (index, key) in keys.enumerated() {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12 * Double(index)) {
+                    postKey(key, to: window)
+                }
             }
-            // 给 SwiftUI 一点时间把选中态与滚动动画画出来
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+            let totalDelay = 0.12 * Double(keys.count) + 0.5
+            DispatchQueue.main.asyncAfter(deadline: .now() + totalDelay) {
                 capture(window: window, to: path)
             }
         }
     }
 
     private static func capture(window: NSWindow, to path: String) {
-        guard let view = window.contentView else {
-            NSApp.terminate(nil)
-            return
+        capture(view: window.contentView, to: path)
+
+        // SwiftUI 的 alert 会以 sheet 形式出现，主窗口截图里看不到，单独存一张
+        if let sheet = window.attachedSheet {
+            let sheetPath = path.replacingOccurrences(of: ".png", with: "-sheet.png")
+            capture(view: sheet.contentView, to: sheetPath)
         }
-        let bounds = view.bounds
-        if let rep = view.bitmapImageRepForCachingDisplay(in: bounds) {
-            view.cacheDisplay(in: bounds, to: rep)
-            if let data = rep.representation(using: .png, properties: [:]) {
-                try? data.write(to: URL(fileURLWithPath: path))
-                FileHandle.standardError.write(Data("snapshot: 已写入 \(path)\n".utf8))
-            }
+
+        // 有 sheet（例如删除确认框）在时 terminate 会被模态会话挡住，直接退出进程
+        if window.attachedSheet != nil {
+            exit(0)
         }
         NSApp.terminate(nil)
+    }
+
+    @discardableResult
+    private static func capture(view: NSView?, to path: String) -> Bool {
+        guard let view else { return false }
+        let bounds = view.bounds
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: bounds) else { return false }
+        view.cacheDisplay(in: bounds, to: rep)
+        guard let data = rep.representation(using: .png, properties: [:]) else { return false }
+        try? data.write(to: URL(fileURLWithPath: path))
+        FileHandle.standardError.write(Data("snapshot: 已写入 \(path)\n".utf8))
+        return true
     }
 
     private static func postKey(_ name: String, to window: NSWindow) {
@@ -66,7 +81,10 @@ enum SnapshotSupport {
             "end": (119, "\u{F72B}"),
             "return": (36, "\r"),
             "escape": (53, "\u{1B}"),
-            "space": (49, " ")
+            "space": (49, " "),
+            "f2": (120, "\u{F705}"),
+            "delete": (51, "\u{7F}"),
+            "forwarddelete": (117, "\u{F728}")
         ]
 
         // 支持 "cmd+a" / "shift+down" 这种带修饰键的写法
@@ -127,10 +145,14 @@ enum SnapshotSupport {
         }
     }
 
-    /// 只覆盖截图脚本会用到的字母键
+    /// 覆盖截图脚本会用到的字母键（美式键位 keyCode）
     private static func keyCodeForCharacter(_ character: String) -> UInt16 {
         let table: [String: UInt16] = [
-            "a": 0, "c": 8, "n": 45, "o": 31, "r": 15, "h": 4
+            "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7,
+            "c": 8, "v": 9, "b": 11, "q": 12, "w": 13, "e": 14, "r": 15,
+            "y": 16, "t": 17, "1": 18, "2": 19, "3": 20, "4": 21, "6": 22,
+            "5": 23, "9": 25, "7": 26, "8": 28, "0": 29, "o": 31, "u": 32,
+            "i": 34, "p": 35, "l": 37, "j": 38, "k": 40, "n": 45, "m": 46
         ]
         return table[character] ?? 0
     }

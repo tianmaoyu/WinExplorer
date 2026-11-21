@@ -12,6 +12,15 @@ struct BrowserView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .toolbar { toolbarContent }
+        .overlay {
+            if let targets = model.pendingPermanentDelete {
+                DeleteConfirmView(
+                    items: targets,
+                    onCancel: { model.cancelPermanentDelete() },
+                    onConfirm: { model.confirmPermanentDelete() }
+                )
+            }
+        }
         .overlay(alignment: .topLeading) {
             // 零尺寸的键盘接收视图，保证方向键/回车不被 SwiftUI 的焦点系统吞掉
             KeyCaptureView(onKey: handleKey)
@@ -64,10 +73,18 @@ struct BrowserView: View {
     // MARK: - 键盘
 
     /// 返回 true 表示事件已被消费。
-    /// ⌘/⌃/⌥ 组合默认放行给菜单栏，但"全选"单独在这里兜底：
+    /// ⌘/⌃/⌥ 组合默认放行给菜单栏，但"全选"和删除单独在这里兜底：
     /// 有些用户把 Command 重映射成了别的键，菜单快捷键可能收不到。
     private func handleKey(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags
+
+        // 确认层打开时拦住所有按键，只允许 Esc 取消，避免在浮层后面误操作列表
+        if model.pendingPermanentDelete != nil {
+            if event.keyCode == 53 {
+                model.cancelPermanentDelete()
+            }
+            return true
+        }
 
         // A = 全选：兼容 ⌘A、以及 Command 被重映射后的 fn+A / ⌥+A
         if event.keyCode == 0 {
@@ -78,12 +95,24 @@ struct BrowserView: View {
             }
         }
 
+        // Delete（keyCode 51）/ 前向删除（117）：⌘⌫ 进废纸篓，⇧⌘⌫ 彻底删除
+        if event.keyCode == 51 || event.keyCode == 117, flags.contains(.command) {
+            if flags.contains(.shift) {
+                model.requestPermanentDelete()
+            } else {
+                model.moveSelectionToTrash()
+            }
+            return true
+        }
+
         let reserved: NSEvent.ModifierFlags = [.command, .control, .option]
         if !flags.intersection(reserved).isEmpty {
             return false
         }
 
         switch event.keyCode {
+        case 120: // F2
+            model.beginRename()
         case 126: // ↑
             model.moveFocus(by: -1)
         case 125: // ↓
@@ -99,7 +128,11 @@ struct BrowserView: View {
         case 36, 76: // Return / 小键盘 Enter
             model.openSelection()
         case 53: // Esc
-            model.clearSelection()
+            if model.pendingPermanentDelete != nil {
+                model.cancelPermanentDelete()
+            } else {
+                model.clearSelection()
+            }
         default:
             return false
         }

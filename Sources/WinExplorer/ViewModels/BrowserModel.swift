@@ -31,6 +31,11 @@ final class BrowserModel: ObservableObject {
     /// 视图消费后触发滚动定位
     @Published var scrollRequest: ScrollRequest?
 
+    /// 正在行内重命名的项
+    @Published private(set) var renamingURL: URL?
+    /// 等待用户确认的"彻底删除"目标
+    @Published private(set) var pendingPermanentDelete: [FileItem]?
+
     @Published var sortColumn: SortColumn = .name {
         didSet { applySortAndFilter() }
     }
@@ -144,6 +149,8 @@ final class BrowserModel: ObservableObject {
             currentURL = url
             allItems = loaded
             clearSelection()
+            renamingURL = nil
+            pendingPermanentDelete = nil
             errorMessage = nil
             applySortAndFilter()
         } catch {
@@ -220,6 +227,13 @@ final class BrowserModel: ObservableObject {
         selection = Set(items.map(\.url))
         focusedURL = items.first?.url
         anchorURL = items.first?.url
+    }
+
+    /// 只选中这一项（右键菜单等操作前调用）
+    func selectOnly(_ item: FileItem) {
+        selection = [item.url]
+        focusedURL = item.url
+        anchorURL = item.url
     }
 
     func clearSelection() {
@@ -302,6 +316,132 @@ final class BrowserModel: ObservableObject {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(paths.joined(separator: "\n"), forType: .string)
         showFlash(paths.count == 1 ? "已复制路径" : "已复制 \(paths.count) 条路径")
+    }
+
+    // MARK: - 重命名
+
+    func beginRename() {
+        guard selection.count == 1, let item = selectedItems.first else {
+            showFlash("请先选中一个项目再重命名")
+            return
+        }
+        renamingURL = item.url
+        errorMessage = nil
+    }
+
+    /// 右键菜单入口：先选中该项再进入编辑
+    func beginRename(item: FileItem) {
+        selectOnly(item)
+        beginRename()
+    }
+
+    func cancelRename() {
+        renamingURL = nil
+    }
+
+    /// 返回是否提交成功；失败时保持编辑状态，让用户改名字
+    @discardableResult
+    func commitRename(_ newName: String) -> Bool {
+        guard let source = renamingURL else { return false }
+
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            errorMessage = "名称不能为空"
+            return false
+        }
+        if trimmed.contains("/") || trimmed.contains(":") {
+            errorMessage = "名称不能包含「/」或「:」"
+            return false
+        }
+        if trimmed == source.lastPathComponent {
+            renamingURL = nil
+            return true
+        }
+
+        let target = source.deletingLastPathComponent().appendingPathComponent(trimmed)
+        if FileManager.default.fileExists(atPath: target.path) {
+            errorMessage = "「\(trimmed)」已存在，请换一个名字"
+            return false
+        }
+
+        do {
+            try FileManager.default.moveItem(at: source, to: target)
+            renamingURL = nil
+            reload()
+            focus(url: target, scroll: false)
+            showFlash("已重命名为「\(trimmed)」")
+            return true
+        } catch {
+            errorMessage = "重命名失败：\(error.localizedDescription)"
+            return false
+        }
+    }
+
+    // MARK: - 删除
+
+    /// 移到废纸篓（可恢复）
+    func moveSelectionToTrash() {
+        let targets = selectedItems
+        guard !targets.isEmpty else { return }
+
+        var failures: [String] = []
+        for item in targets {
+            do {
+                try FileManager.default.trashItem(at: item.url, resultingItemURL: nil)
+            } catch {
+                failures.append("\(item.name)：\(error.localizedDescription)")
+            }
+        }
+
+        reload()
+        if failures.isEmpty {
+            showFlash(targets.count == 1 ? "已移到废纸篓" : "已把 \(targets.count) 项移到废纸篓")
+        } else {
+            errorMessage = "部分项目无法移到废纸篓：\n" + failures.joined(separator: "\n")
+        }
+    }
+
+    /// 彻底删除需要二次确认，这里只登记目标
+    func requestPermanentDelete() {
+        let targets = selectedItems
+        guard !targets.isEmpty else { return }
+        pendingPermanentDelete = targets
+    }
+
+    func cancelPermanentDelete() {
+        pendingPermanentDelete = nil
+    }
+
+    /// 用户确认后执行，不进废纸篓，不可撤销
+    func confirmPermanentDelete() {
+        guard let targets = pendingPermanentDelete else { return }
+        pendingPermanentDelete = nil
+
+        var removed = 0
+        var failures: [String] = []
+
+        for item in targets {
+            // 安全兜底：绝不删除当前目录本身或其祖先
+            let path = item.url.standardizedFileURL.path
+            let current = currentURL.standardizedFileURL.path
+            if path == current || current.hasPrefix(path + "/") {
+                failures.append("\(item.name)：不能删除当前所在目录")
+                continue
+            }
+            do {
+                try FileManager.default.removeItem(at: item.url)
+                removed += 1
+            } catch {
+                failures.append("\(item.name)：\(error.localizedDescription)")
+            }
+        }
+
+        reload()
+        if failures.isEmpty {
+            showFlash("已彻底删除 \(removed) 项")
+        } else {
+            errorMessage = "部分项目删除失败：\n" + failures.joined(separator: "\n")
+        }
     }
 
     /// 新建文件夹，重名时自动加序号（Windows 的"新建文件夹 2"习惯）

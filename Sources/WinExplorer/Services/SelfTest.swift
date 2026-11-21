@@ -138,6 +138,65 @@ enum SelfTest {
                 && model.focusedURL?.lastPathComponent == "新建文件夹 2",
               "选中 \(model.selection.count) 项，焦点 \(model.focusedURL?.lastPathComponent ?? "nil")")
 
+        // MARK: 重命名与删除（全部限制在临时目录内，不碰任何用户文件）
+        let work = root.appendingPathComponent("ops")
+        try? fm.createDirectory(at: work, withIntermediateDirectories: false)
+        fm.createFile(atPath: work.appendingPathComponent("草稿.txt").path,
+                      contents: Data("x".utf8))
+        fm.createFile(atPath: work.appendingPathComponent("已存在.txt").path,
+                      contents: Data("y".utf8))
+        let sentinel = root.appendingPathComponent("不要动我.txt")
+        fm.createFile(atPath: sentinel.path, contents: Data("keep".utf8))
+
+        model.navigate(to: work)
+        check("进入操作测试目录", model.currentURL == work.standardizedFileURL)
+
+        // 重命名成功
+        if let draft = model.items.first(where: { $0.name == "草稿.txt" }) {
+            model.focus(url: draft.url)
+            model.beginRename()
+            check("进入行内重命名", model.renamingURL?.lastPathComponent == "草稿.txt")
+            let ok = model.commitRename("报告-最终.txt")
+            check("重命名成功", ok && fm.fileExists(atPath: work.appendingPathComponent("报告-最终.txt").path))
+            check("旧文件名已不存在", !fm.fileExists(atPath: work.appendingPathComponent("草稿.txt").path))
+        } else {
+            check("进入行内重命名", false, "找不到测试文件")
+            check("重命名成功", false, "找不到测试文件")
+            check("旧文件名已不存在", false, "找不到测试文件")
+        }
+
+        // 重名冲突：必须拒绝，且原文件不丢
+        if let renamed = model.items.first(where: { $0.name == "报告-最终.txt" }) {
+            model.beginRename(item: renamed)
+            let conflict = model.commitRename("已存在.txt")
+            check("重名被拒绝", !conflict)
+            check("重名后原文件仍在",
+                  fm.fileExists(atPath: work.appendingPathComponent("报告-最终.txt").path))
+            check("重名后保持编辑态", model.renamingURL != nil)
+
+            let illegal = model.commitRename("a/b.txt")
+            check("含斜杠的名称被拒绝", !illegal)
+            let empty = model.commitRename("   ")
+            check("空名称被拒绝", !empty)
+            model.cancelRename()
+            check("取消重命名", model.renamingURL == nil)
+        } else {
+            check("重名被拒绝", false, "重命名未生效")
+        }
+
+        // 彻底删除：先确认，再执行
+        let victim = work.appendingPathComponent("待删除.txt")
+        fm.createFile(atPath: victim.path, contents: Data("z".utf8))
+        model.reload()
+        model.focus(url: victim)
+        model.requestPermanentDelete()
+        check("彻底删除需要二次确认", model.pendingPermanentDelete?.count == 1)
+        check("确认前文件还在", fm.fileExists(atPath: victim.path))
+        model.confirmPermanentDelete()
+        check("确认后文件被删除", !fm.fileExists(atPath: victim.path))
+        check("删除后清空待确认状态", model.pendingPermanentDelete == nil)
+        check("临时目录外的文件未被触碰", fm.fileExists(atPath: sentinel.path))
+
         let before = model.currentURL
         model.navigate(to: root.appendingPathComponent("no-such-dir"))
         check("打不开的目录给出提示而不是崩溃",
