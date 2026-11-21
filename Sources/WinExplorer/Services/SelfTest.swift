@@ -1461,6 +1461,19 @@ enum SelfTest {
               "left=\(model.expandedPaths.count)")
         check("树形：折叠后回到单层", model.treeRows.count == 1)
 
+        // 刷新期间行数不能塌：旧内容继续显示，新内容到了再替换（adr/0020）
+        model.toggleExpanded(treeSub)
+        waitForChildren(treeSub)
+        let rowsBeforeRefresh = model.treeRows.count
+        check("树形：刷新前是展开状态", rowsBeforeRefresh > 1, "rows=\(rowsBeforeRefresh)")
+
+        model.refreshFromDisk()
+        check("树形：刷新不会把已展开的行清空", model.treeRows.count == rowsBeforeRefresh,
+              "刷新前 \(rowsBeforeRefresh)，刷新后 \(model.treeRows.count)")
+        waitForChildren(treeSub)
+        check("树形：刷新后子项仍在", model.treeRows.count == rowsBeforeRefresh)
+        model.toggleExpanded(treeSub)
+
         // 向指定文件夹添加：右键菜单传的就是这个参数
         model.createFolder(in: treeSub)
         check("树形：新建落在指定文件夹里",

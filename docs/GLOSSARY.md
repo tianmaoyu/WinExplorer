@@ -106,4 +106,6 @@
 | **扁平化行** | 树形的一行：文件项 + 缩进层级 + 是否展开，交给 `LazyVStack` 直接渲染 | `TreeRow` |
 | **树键** | 展开集合与子项缓存的键，必须是标准化后的**路径字符串**（URL 的相等性会被 /tmp 与 /private/tmp 破坏） | `BrowserModel.treeKey` |
 | **级联删除** | 删文件夹时子文件夹与文件一并删除；确认框异步统计并写明数量 | `DeleteConfirmView` |
+| **树缓存原地重读** | 刷新时不丢子项缓存，后台重读后覆盖；避免展开的子树在重读期间整片消失 | `BrowserModel.ensureChildrenLoaded(_:force:)`（adr/0020） |
+| **items / rows** | 数据侧可见项数 与 界面侧行数；两者对不上就是「看不到文件」的直接证据，已进运行日志采样 | `BrowserModel.diagnosticsSummary` |
 

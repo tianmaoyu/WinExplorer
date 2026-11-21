@@ -337,8 +337,10 @@ final class RunLog {
             let menuBuilds = self.drainMenuBuilds()
             DispatchQueue.main.async {
                 let geometry = Self.windowGeometry()
+                // 数据侧 / 界面侧的行数必须对得上；对不上就是「看不到文件」的直接证据
+                let ui = BrowserModel.diagnosticsTarget?.diagnosticsSummary ?? "no-model"
                 // menuBuilds 是这一轮的「列表重算强度」：异常高说明视图在反复全量刷新
-                self.log(.sys, "fd=\(sample.fd) threads=\(sample.threads) rss=\(sample.rssMB)MB menuBuilds=\(menuBuilds) \(geometry)")
+                self.log(.sys, "fd=\(sample.fd) threads=\(sample.threads) rss=\(sample.rssMB)MB menuBuilds=\(menuBuilds) \(geometry) \(ui)")
             }
         }
         timer.resume()

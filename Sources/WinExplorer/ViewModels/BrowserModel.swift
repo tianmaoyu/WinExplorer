@@ -360,6 +360,7 @@ final class BrowserModel: ObservableObject {
         let requested = url ?? envStart ?? remembered ?? FileManager.default.homeDirectoryForCurrentUser
         let start = requested.standardizedFileURL
         currentURL = start
+        Self.diagnosticsTarget = self
         load(directory: start, recordHistory: false)
 
         // 外部程序在这个目录里新建/删除/改名时自动刷新
@@ -822,6 +823,15 @@ final class BrowserModel: ObservableObject {
     /// 树形展开会让「搜索到底搜不搜子层」变得含糊，这里不引入歧义。
     private var usesTreeLayout: Bool { searchQuery.isEmpty }
 
+    /// 最近一次活跃的模型，供运行日志采样「界面上有多少行」（adr/0020）。
+    /// 纯诊断用，不参与任何逻辑。
+    static weak var diagnosticsTarget: BrowserModel?
+
+    /// 一行摘要：数据侧（items）与界面侧（rows）必须对得上
+    var diagnosticsSummary: String {
+        "items=\(items.count) rows=\(treeRows.count) expanded=\(expandedPaths.count) loading=\(loadingTreePaths.count) search=\(isSearching ? 1 : 0) hidden=\(showHidden ? 1 : 0)"
+    }
+
     /// 展开 / 折叠一个文件夹
     func toggleExpanded(_ url: URL) {
         // 一律用标准化后的 **路径字符串** 当键：URL 的相等性会被
@@ -854,9 +864,10 @@ final class BrowserModel: ObservableObject {
     }
 
     /// 读某个文件夹的子项（已有缓存就直接用）
-    private func ensureChildrenLoaded(_ url: URL) {
+    private func ensureChildrenLoaded(_ url: URL, force: Bool = false) {
         let key = Self.treeKey(url)
-        guard treeChildren[key] == nil, !loadingTreePaths.contains(key) else { return }
+        guard !loadingTreePaths.contains(key) else { return }
+        guard force || treeChildren[key] == nil else { return }
         loadingTreePaths.insert(key)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -889,6 +900,10 @@ final class BrowserModel: ObservableObject {
         }
         var rows: [TreeRow] = []
         appendRows(from: items, depth: 0, into: &rows)
+        // 不变式：有数据就必须有行。破坏它等于界面一定空白，所以留痕（adr/0020）
+        if rows.isEmpty, !items.isEmpty {
+            RunLog.shared.log(.perf, "⚠️ 树形行为空但 items=\(items.count)（当前目录 \(currentURL.path)）")
+        }
         treeRows = rows
         if ProcessInfo.processInfo.environment["WINEXPLORER_TREE_DEBUG"] == "1" {
             let dump = rows.prefix(20).map { "\(String(repeating: "  ", count: $0.depth))\($0.item.name)" }
@@ -925,20 +940,28 @@ final class BrowserModel: ObservableObject {
     /// - `keepingExpansion == true`：保留哪些文件夹是展开的，把内容重读一遍（同目录刷新）
     /// - `keepingExpansion == false`：连展开状态一起清掉（换了目录）
     private func invalidateTreeCache(keepingExpansion: Bool) {
-        treeChildren.removeAll()
         guard keepingExpansion else {
+            treeChildren.removeAll()
             expandedPaths.removeAll()
             return
         }
-        // 被删掉的文件夹不能继续留在展开集合里：否则每次刷新都会去读一个
-        // 已经不存在的路径，而且「折叠父级」时还会留下幽灵节点
+        // **故意不清 treeChildren**（adr/0020）：
+        // 清空会让 rows 在重读期间从 93 行塌回 50 行（只剩顶层），
+        // 用户看到的就是「文件突然消失，几秒后又回来」。
+        // 改成原地重读覆盖：旧内容继续显示，新内容到了再替换。
+        //
+        // 被删掉的文件夹仍要从展开集合里剔掉，否则每次刷新都去读一个不存在的路径。
         let fm = FileManager.default
         expandedPaths = expandedPaths.filter { fm.fileExists(atPath: $0) }
     }
 
     /// 把已展开的目录重新读一遍（刷新后子树内容可能变了）
     private func reloadExpandedSubtrees() {
-        for path in expandedPaths { ensureChildrenLoaded(URL(fileURLWithPath: path)) }
+        // force：磁盘上可能已经变了，必须重读；但**不先删缓存**，
+        // 这样重读期间界面还是旧内容，不会闪成空白
+        for path in expandedPaths {
+            ensureChildrenLoaded(URL(fileURLWithPath: path), force: true)
+        }
     }
 
     /// 一次文件系统改动（新建 / 移动）后的收尾：
@@ -952,9 +975,9 @@ final class BrowserModel: ObservableObject {
             return
         }
         expandedPaths.insert(Self.treeKey(directory))
-        treeChildren[Self.treeKey(directory)] = nil
         if let target { pendingRevealURL = target.standardizedFileURL }
-        ensureChildrenLoaded(directory)
+        // force 重读，不先清缓存：新建的那一项会随后出现，行数不会塌
+        ensureChildrenLoaded(directory, force: true)
         rebuildTreeRows()
     }
 
@@ -976,9 +999,8 @@ final class BrowserModel: ObservableObject {
         }
         guard !chain.isEmpty else { return }
         for dir in chain { expandedPaths.insert(Self.treeKey(dir)) }
-        // 这些目录的内容需要重读（刚写进去的东西不在旧缓存里）
-        for dir in chain { treeChildren[Self.treeKey(dir)] = nil }
-        for dir in chain { ensureChildrenLoaded(dir) }
+        // 这些目录的内容需要重读（刚写进去的东西不在旧缓存里），但不清旧缓存
+        for dir in chain { ensureChildrenLoaded(dir, force: true) }
         rebuildTreeRows()
     }
 
