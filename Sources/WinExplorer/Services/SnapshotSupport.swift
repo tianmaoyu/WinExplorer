@@ -187,6 +187,14 @@ enum SnapshotSupport {
                         FileManager.default.createFile(atPath: url.path, contents: Data("snapshot hook".utf8))
                         return
                     }
+                    if key.hasPrefix("select:") {
+                        // select:<index> —— 选中第 N 行，截图验收选中高亮用
+                        let raw = String(key.dropFirst("select:".count))
+                        if let index = Int(raw), index >= 0, index < active.items.count {
+                            active.selectOnly(active.items[index])
+                        }
+                        return
+                    }
                     if key == "scroll:end" {
                         // 滚到列表最底部（露出底部留白），截图验收「留空白」用。
                         // 刚 nav: 完布局还没就绪时首次 scrollTo 会扑空，隔 0.35s 重发一次

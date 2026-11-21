@@ -96,3 +96,6 @@
 | **菜单构建** | SwiftUI 会为每一行**预先**构建整套右键菜单（不是右键时才建），所以菜单路径上不能有任何磁盘 / IPC 操作 | `FileListView.contextMenu` |
 | **主线程卡顿检测** | 后台每 100ms 投一次心跳，超时即记录并 dump 卡住前最近 40 条事件 | `RunLog.startHangDetection` |
 | **菜单构建强度** | 资源采样里的 `menuBuilds`：一轮采样内列表重建次数 × 行数。异常高说明视图在反复全量刷新 | `RunLog.recordMenuBuild` |
+| **交替条纹** | 列表相邻行用 `alternatingContentBackgroundColors[1]` 与行底交替，深浅色模式自动适配 | `FileRow.isStriped`（adr/0017） |
+| **列分隔线** | 贯穿表头与行的发丝线，位置由 `dividerX` 统一推算；悬停时变 2pt 强调色提示可拖 | `FileListLayout.columnDivider` |
+| **选中高亮内缩** | 访达比例：左右各让 5pt、上下各让 1pt、圆角 5pt；高亮层在条纹之上，会盖住分隔线 | `FileListLayout.selection*Inset` |

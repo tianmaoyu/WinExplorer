@@ -11,6 +11,46 @@ enum FileListLayout {
     static let dateTrailingPadding: CGFloat = 4
     static let dividerHitWidth: CGFloat = 7
 
+    // MARK: 列表样式（对齐访达，adr/0017）
+
+    /// 选中高亮的圆角。访达列表视图约 5pt，比 Windows 的直角高亮柔和
+    static let selectionCornerRadius: CGFloat = 5
+    /// 选中高亮左右留白：访达不会贴到窗口边缘，两侧各让出一点
+    static let selectionHorizontalInset: CGFloat = 5
+    /// 选中高亮上下留白：访达几乎贴满行高，只上下各让 1pt
+    static let selectionVerticalInset: CGFloat = 1
+
+    /// 列分隔线：高度比行高略短，视觉上像表格里的一道细缝而不是切开的块
+    static let columnDividerInset: CGFloat = 5
+    /// 列分隔线宽度（1px 在 Retina 上正好是发丝线）
+    static let columnDividerWidth: CGFloat = 1
+
+    /// 交替条纹的底色。用系统语义色，深浅色模式自动切换，
+    /// 且和 `textBackgroundColor` 的对比度是系统调好的，不会刺眼。
+    static var stripeColor: Color {
+        let colors = NSColor.alternatingContentBackgroundColors
+        if colors.count > 1 { return Color(nsColor: colors[1]) }
+        return Color.primary.opacity(0.035)
+    }
+
+    /// 列分隔线颜色。`separatorColor` 叠在表头底色上几乎看不见（实测只差 5 级灰），
+    /// 所以直接用「主色 13%」：浅色下是接近 210 的灰、深色下是比底色亮一档，
+    /// 两个模式下都能一眼看出列边界。
+    static var columnDividerColor: Color {
+        Color.primary.opacity(0.13)
+    }
+
+    /// 某一列的边界竖线（相对行/表头左缘的 x）画成一根发丝线
+    static func columnDivider(_ column: ResizableColumn, widths: ColumnWidths,
+                              totalWidth: CGFloat, height: CGFloat) -> some View {
+        Rectangle()
+            .fill(columnDividerColor)
+            .frame(width: columnDividerWidth, height: max(0, height))
+            .offset(
+                x: dividerX(column, widths: widths, totalWidth: totalWidth) - columnDividerWidth / 2
+            )
+    }
+
     /// 底部留白：只加在滚动内容的最底部（顶部/中间/左右都不加）。
     /// 密集列表也能向下滚出一段空白，右键空白的「新建」菜单永远可达（adr/0010）。
     static let trailingBlankHeight: CGFloat = 240
@@ -62,6 +102,8 @@ struct FileListView: View {
     /// 列宽拖拽的起始宽度（一次只拖一条边界）
     @State private var resizeStart: CGFloat?
     @State private var resizingColumn: ResizableColumn?
+    /// 鼠标悬在哪条列分隔线上（悬停时线变强调色，提示「这里可以拖」）
+    @State private var hoveredDivider: ResizableColumn?
 
     var body: some View {
         GeometryReader { geometry in
@@ -146,8 +188,9 @@ struct FileListView: View {
         LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
             Section {
                 VStack(spacing: 0) {
-                    ForEach(model.items) { item in
-                        row(for: item)
+                    // 用索引算奇偶：访达式的交替条纹
+                    ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
+                        row(for: item, striped: !index.isMultiple(of: 2))
                             .id(item.url)
                     }
                 }
@@ -214,18 +257,31 @@ struct FileListView: View {
     }
 
     private func dividerHandle(_ column: ResizableColumn) -> some View {
-        Rectangle()
-            .fill(Color.clear)
-            .frame(width: FileListLayout.dividerHitWidth, height: FileListLayout.rowHeight)
-            .contentShape(Rectangle())
-            .onHover { inside in
-                // 用 set 而不是 push/pop：视图被重建时 push 容易和 pop 失配，鼠标指针会卡住
-                if inside {
-                    NSCursor.resizeLeftRight.set()
-                } else {
-                    NSCursor.arrow.set()
-                }
+        ZStack {
+            // 透明拖拽热区（比可见线宽，好抓）
+            Rectangle()
+                .fill(Color.clear)
+
+            // 可见分隔线：平时是发丝线，悬停时加粗并变强调色 —— 拖拽的手感来自这里
+            Rectangle()
+                .fill(hoveredDivider == column
+                      ? Color.accentColor
+                      : FileListLayout.columnDividerColor)
+                .frame(width: hoveredDivider == column ? 2 : FileListLayout.columnDividerWidth)
+                .padding(.vertical, FileListLayout.columnDividerInset)
+                .allowsHitTesting(false)
+        }
+        .frame(width: FileListLayout.dividerHitWidth, height: FileListLayout.rowHeight)
+        .contentShape(Rectangle())
+        .onHover { inside in
+            hoveredDivider = inside ? column : (hoveredDivider == column ? nil : hoveredDivider)
+            // 用 set 而不是 push/pop：视图被重建时 push 容易和 pop 失配，鼠标指针会卡住
+            if inside {
+                NSCursor.resizeLeftRight.set()
+            } else {
+                NSCursor.arrow.set()
             }
+        }
             .gesture(
                 DragGesture(minimumDistance: 1)
                     .onChanged { value in
@@ -292,7 +348,7 @@ struct FileListView: View {
 
     // MARK: - 行（三种模式共用交互）
 
-    private func row(for item: FileItem) -> some View {
+    private func row(for item: FileItem, striped: Bool = false) -> some View {
         let renaming = model.renamingURL == item.url
         return interactive(item: item, renaming: renaming) {
             FileRow(
@@ -302,7 +358,8 @@ struct FileListView: View {
                 isRenaming: renaming,
                 isCut: model.cutURLs.contains(item.url),
                 isDropTarget: model.isDropTarget(item.url),
-                widths: model.columnWidths
+                widths: model.columnWidths,
+                isStriped: striped
             )
             .frame(height: FileListLayout.rowHeight)
         }
@@ -686,6 +743,8 @@ struct FileRow: View {
     var isCut: Bool = false
     var isDropTarget: Bool = false
     let widths: ColumnWidths
+    /// 奇数行底色（访达式交替条纹）
+    var isStriped: Bool = false
 
     @State private var hovered = false
 
@@ -720,10 +779,39 @@ struct FileRow: View {
                 .lineLimit(1)
                 .foregroundStyle(secondaryColor)
         }
+        // 先把高度撑满整行：`background` 只覆盖内容尺寸（约 16pt），
+        // 不先定高的话条纹只会画成一条细带，上下露出父视图的底色。
+        .frame(height: FileListLayout.rowHeight)
+        // 上层：选中 / 悬停高亮。访达的比例：左右各让 5pt，上下各让 1pt，圆角 5。
+        // 注意 background 的叠放顺序：**先写的那层更靠上**，所以高亮必须放在前面，
+        // 否则条纹会盖住选中色。
         .background {
-            RoundedRectangle(cornerRadius: 5)
+            RoundedRectangle(cornerRadius: FileListLayout.selectionCornerRadius)
                 .fill(backgroundColor)
-                .padding(.horizontal, 4)
+                .padding(.horizontal, FileListLayout.selectionHorizontalInset)
+                .padding(.vertical, FileListLayout.selectionVerticalInset)
+        }
+        // 下层：交替条纹 + 贯穿的列分隔线（选中时被上面的高亮整块盖住）
+        .background {
+            GeometryReader { geometry in
+                ZStack(alignment: .topLeading) {
+                    if isStriped {
+                        FileListLayout.stripeColor
+                    }
+                    ForEach(ResizableColumn.allCases, id: \.self) { column in
+                        FileListLayout.columnDivider(
+                            column,
+                            widths: widths,
+                            totalWidth: geometry.size.width,
+                            height: FileListLayout.rowHeight - FileListLayout.columnDividerInset * 2
+                        )
+                        .offset(y: FileListLayout.columnDividerInset)
+                    }
+                }
+                // 显式撑满：ZStack 的尺寸由子视图决定，不铺开的话条纹只画出一条细带
+                .frame(width: geometry.size.width, height: geometry.size.height,
+                       alignment: .topLeading)
+            }
         }
         // 剪切中的项整体变淡（Windows 的"待移动"观感）；未授权项更淡一些
         .opacity(rowOpacity)
