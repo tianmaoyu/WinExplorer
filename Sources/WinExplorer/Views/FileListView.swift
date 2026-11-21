@@ -32,39 +32,52 @@ enum FileListLayout {
     }
 }
 
-/// Windows 资源管理器式的"详细信息"列表：表头可排序，行可双击打开。
+/// Windows 资源管理器式的"详细信息"列表：表头可排序，行可多选、可双击打开。
 struct FileListView: View {
     @ObservedObject var model: BrowserModel
 
     var body: some View {
-        Group {
-            if model.items.isEmpty {
-                VStack(spacing: 0) {
-                    header
-                    Divider()
-                    emptyState
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-            } else {
-                // 表头必须和数据行处在同一个滚动容器里，否则滚动条占用的宽度
-                // 会让表头和数据列整体错开（15pt 级偏差）。
+        GeometryReader { geometry in
+            ScrollViewReader { proxy in
                 ScrollView(.vertical) {
-                    LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                        Section {
-                            VStack(spacing: 0) {
-                                ForEach(model.items) { item in
-                                    row(for: item)
-                                }
+                    ZStack(alignment: .top) {
+                        // 空白区域点一下清空选择；行在 ZStack 上层，会先拿到点击
+                        Color(nsColor: .textBackgroundColor)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                model.clearSelection()
                             }
-                            .padding(.vertical, 4)
-                        } header: {
-                            VStack(spacing: 0) {
-                                header
-                                Divider()
+
+                        LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                            Section {
+                                VStack(spacing: 0) {
+                                    ForEach(model.items) { item in
+                                        row(for: item)
+                                            .id(item.url)
+                                    }
+                                }
+                                .padding(.vertical, 4)
+                            } header: {
+                                VStack(spacing: 0) {
+                                    header
+                                    Divider()
+                                }
                             }
                         }
                     }
+                    .frame(minHeight: geometry.size.height, alignment: .top)
                 }
+                .onChange(of: model.scrollRequest) { _, request in
+                    guard let request else { return }
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        proxy.scrollTo(request.url, anchor: nil)
+                    }
+                }
+            }
+
+            if model.items.isEmpty {
+                emptyState
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .background(Color(nsColor: .textBackgroundColor))
@@ -109,16 +122,17 @@ struct FileListView: View {
     // MARK: - 行
 
     private func row(for item: FileItem) -> some View {
-        FileRow(item: item, isSelected: item.url == model.selection)
+        FileRow(item: item, isSelected: model.selection.contains(item.url))
             .frame(height: FileListLayout.rowHeight)
             .contentShape(Rectangle())
             .onTapGesture(count: 2) {
-                model.selection = item.url
                 model.open(item)
             }
             .simultaneousGesture(
                 TapGesture(count: 1).onEnded {
-                    model.selection = item.url
+                    // 点击后把键盘焦点拿回来，否则方向键会失效
+                    FocusKeeper.shared.reclaim()
+                    model.handleClick(on: item, modifiers: NSEvent.modifierFlags)
                 }
             )
             .contextMenu {
@@ -128,15 +142,25 @@ struct FileListView: View {
 
     @ViewBuilder
     private func contextMenu(for item: FileItem) -> some View {
+        let inSelection = model.selection.contains(item.url)
+
         Button("打开") {
-            model.open(item)
+            if inSelection {
+                model.openSelection()
+            } else {
+                model.open(item)
+            }
         }
         Button("在 Finder 中显示") {
             model.revealInFinder(item)
         }
         Divider()
-        Button("复制路径") {
-            model.copyPath(item)
+        Button(inSelection && model.selection.count > 1 ? "复制 \(model.selection.count) 项路径" : "复制路径") {
+            if inSelection && model.selection.count > 1 {
+                model.copySelectedPaths()
+            } else {
+                model.copyPath(item)
+            }
         }
         Divider()
         Button("刷新") {

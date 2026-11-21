@@ -26,13 +26,18 @@ struct SidebarView: View {
             .listStyle(.sidebar)
 
             Divider()
-            Text("WinExplorer 0.1 · MVP")
+            Text("WinExplorer \(Self.appVersion) · MVP")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
         }
+    }
+
+    /// 侧边栏底部显示的版本号，跟随 Info.plist
+    private static var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
     }
 
     private var selectionBinding: Binding<URL?> {

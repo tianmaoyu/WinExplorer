@@ -23,6 +23,28 @@ struct ExplorerCommands: Commands {
             .disabled(!model.hasSelection)
         }
 
+        CommandGroup(after: .pasteboard) {
+            Button("全选") {
+                model.selectAll()
+            }
+            .keyboardShortcut("a", modifiers: .command)
+            .disabled(model.items.isEmpty)
+
+            Button("取消选择") {
+                model.clearSelection()
+            }
+            .keyboardShortcut(.escape, modifiers: [])
+            .disabled(!model.hasSelection)
+
+            Divider()
+
+            Button("复制路径") {
+                model.copySelectedPaths()
+            }
+            .keyboardShortcut("c", modifiers: [.command, .option])
+            .disabled(!model.hasSelection)
+        }
+
         CommandMenu("前往") {
             Button("后退") {
                 model.goBack()
