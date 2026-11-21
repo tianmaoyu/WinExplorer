@@ -187,11 +187,22 @@ enum SnapshotSupport {
                         FileManager.default.createFile(atPath: url.path, contents: Data("snapshot hook".utf8))
                         return
                     }
+                    if key.hasPrefix("expand:") {
+                        // expand:<index> —— 展开当前列表第 N 行（必须是文件夹），验收树形用
+                        let raw = String(key.dropFirst("expand:".count))
+                        if let index = Int(raw), index >= 0, index < active.items.count {
+                            let item = active.items[index]
+                            if item.isDirectory { active.toggleExpanded(item.url) }
+                        }
+                        return
+                    }
                     if key.hasPrefix("select:") {
                         // select:<index> —— 选中第 N 行，截图验收选中高亮用
                         let raw = String(key.dropFirst("select:".count))
-                        if let index = Int(raw), index >= 0, index < active.items.count {
-                            active.selectOnly(active.items[index])
+                        // 用可见行（树形展开后包含子层），索引与截图所见一致
+                        let pool = active.treeRows.map(\.item)
+                        if let index = Int(raw), index >= 0, index < pool.count {
+                            active.selectOnly(pool[index])
                         }
                         return
                     }

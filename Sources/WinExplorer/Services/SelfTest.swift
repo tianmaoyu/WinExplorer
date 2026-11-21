@@ -1420,6 +1420,65 @@ enum SelfTest {
         BrowserModel.loadsDirectorySynchronously = true
         model.navigate(to: root)
 
+        // MARK: 树形展开（adr/0019）
+        let treeRoot = root.appendingPathComponent("treetest")
+        let treeSub = treeRoot.appendingPathComponent("sub")
+        let treeDeep = treeSub.appendingPathComponent("deep")
+        try? fm.createDirectory(at: treeDeep, withIntermediateDirectories: true)
+        fm.createFile(atPath: treeSub.appendingPathComponent("a.txt").path, contents: Data("x".utf8))
+        fm.createFile(atPath: treeDeep.appendingPathComponent("b.txt").path, contents: Data("x".utf8))
+
+        model.navigate(to: treeRoot)
+        check("树形：初始只显示当前层",
+              model.treeRows.count == 1 && model.treeRows.first?.depth == 0,
+              "rows=\(model.treeRows.count)")
+
+        func waitForChildren(_ url: URL) {
+            let deadline = Date().addingTimeInterval(3)
+            while model.isTreeLoading(url), Date() < deadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+
+        model.toggleExpanded(treeSub)
+        waitForChildren(treeSub)
+        // sub 里有两个子项：a.txt 和 deep
+        check("树形：展开后子项进入列表", model.treeRows.count == 3, "rows=\(model.treeRows.count)")
+        check("树形：子项缩进一层", model.treeRows.last?.depth == 1)
+        check("树形：父节点标记为已展开", model.treeRows.first?.isExpanded == true)
+
+        model.toggleExpanded(treeDeep)
+        waitForChildren(treeDeep)
+        // 同层里「文件夹优先」，所以第三层那行不一定排在最后，按 depth 找
+        check("树形：可以展开到第三层",
+              model.treeRows.count == 4 && model.treeRows.contains { $0.depth == 2 },
+              "rows=\(model.treeRows.count) depths=\(model.treeRows.map(\.depth))")
+        check("树形：两层各自被记住", model.expandedPaths.count == 2)
+
+        model.toggleExpanded(treeSub)
+        check("树形：折叠父级会连同后代一起收起", model.expandedPaths.isEmpty,
+              "left=\(model.expandedPaths.count)")
+        check("树形：折叠后回到单层", model.treeRows.count == 1)
+
+        // 向指定文件夹添加：右键菜单传的就是这个参数
+        model.createFolder(in: treeSub)
+        check("树形：新建落在指定文件夹里",
+              fm.fileExists(atPath: treeSub.appendingPathComponent(L("新建文件夹", "New Folder")).path))
+
+        // 搜索时退化为扁平：只匹配当前层，不跨层展开
+        model.toggleExpanded(treeSub)
+        waitForChildren(treeSub)
+        model.searchText = "a"
+        check("树形：搜索时退化为扁平列表",
+              model.treeRows.allSatisfy { $0.depth == 0 }, "rows=\(model.treeRows.count)")
+        model.searchText = ""
+
+        // 收尾：回到干净的当前目录，后面的用例依赖它
+        model.collapseAllTreeNodes()
+        model.navigate(to: root)
+        check("树形：全部收起后没有残留", model.expandedPaths.isEmpty)
+
         check("本地化按当前语言取文案", L("甲", "A") == (L10n.isEnglish ? "A" : "甲"))
 
         // MARK: 性能重构后的回归点

@@ -102,4 +102,8 @@
 | **列宽光标** | 悬停在列分隔线上的自绘光标：中间竖线 + 两侧箭头，白色描边适配深浅背景 | `FileListView.DividerCursor` |
 | **列内留白** | 左对齐列的内容与列边界之间的 8pt 间距；分隔线画在列边界上，不留白文字会压线 | `FileListLayout.columnTextInset` |
 | **光标区域** | 用 `NSView.addCursorRect` 声明「这块区域用这个光标」，AppKit 在每次鼠标移动时自动应用；与 `NSCursor.set()` 的一次性设置相反 | `FileListView.DividerArea`（adr/0018） |
+| **树形展开** | 只保存「哪些文件夹展开着」+「展开过的文件夹里有什么」，渲染时扁平化成行；不建内存树 | `BrowserModel.expandedPaths`（adr/0019） |
+| **扁平化行** | 树形的一行：文件项 + 缩进层级 + 是否展开，交给 `LazyVStack` 直接渲染 | `TreeRow` |
+| **树键** | 展开集合与子项缓存的键，必须是标准化后的**路径字符串**（URL 的相等性会被 /tmp 与 /private/tmp 破坏） | `BrowserModel.treeKey` |
+| **级联删除** | 删文件夹时子文件夹与文件一并删除；确认框异步统计并写明数量 | `DeleteConfirmView` |
 

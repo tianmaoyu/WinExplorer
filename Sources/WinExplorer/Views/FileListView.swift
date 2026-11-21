@@ -25,6 +25,11 @@ enum FileListLayout {
     /// 列分隔线宽度（1px 在 Retina 上正好是发丝线）
     static let columnDividerWidth: CGFloat = 1
 
+    /// 树形列表每层缩进
+    static let treeIndent: CGFloat = 13
+    /// 展开三角的占位宽度（叶子节点也留这么宽，保证图标对齐）
+    static let treeDisclosureWidth: CGFloat = 12
+
     /// 列内容与左边界之间的留白。
     /// 分隔线就画在列边界上，而「修改日期」「类型」是左对齐的 —— 不留这段距离
     /// 文字会直接压在线上。8pt 是目测下来既透气又不浪费宽度的值。
@@ -321,10 +326,10 @@ struct FileListView: View {
         LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
             Section {
                 VStack(spacing: 0) {
-                    // 用索引算奇偶：访达式的交替条纹
-                    ForEach(Array(model.items.enumerated()), id: \.element.id) { index, item in
-                        row(for: item, striped: !index.isMultiple(of: 2))
-                            .id(item.url)
+                    // 树形展开后的扁平行；索引用来算访达式交替条纹
+                    ForEach(Array(model.treeRows.enumerated()), id: \.element.id) { index, row in
+                        treeRow(row, striped: !index.isMultiple(of: 2))
+                            .id(row.item.url)
                     }
                 }
                 .padding(.vertical, 4)
@@ -480,7 +485,8 @@ struct FileListView: View {
 
     // MARK: - 行（三种模式共用交互）
 
-    private func row(for item: FileItem, striped: Bool = false) -> some View {
+    private func treeRow(_ row: TreeRow, striped: Bool = false) -> some View {
+        let item = row.item
         let renaming = model.renamingURL == item.url
         return interactive(item: item, renaming: renaming) {
             FileRow(
@@ -491,7 +497,11 @@ struct FileListView: View {
                 isCut: model.cutURLs.contains(item.url),
                 isDropTarget: model.isDropTarget(item.url),
                 widths: model.columnWidths,
-                isStriped: striped
+                isStriped: striped,
+                depth: row.depth,
+                isExpanded: row.isExpanded,
+                isTreeLoading: model.isTreeLoading(item.url),
+                onToggleExpand: { model.toggleExpanded(item.url) }
             )
             .frame(height: FileListLayout.rowHeight)
         }
@@ -644,6 +654,24 @@ struct FileListView: View {
             }
             .disabled(!model.canPaste || model.isTransferring)
         }
+        Button(L("移动到…", "Move to…")) {
+            model.chooseMoveDestination()
+        }
+        .disabled(model.selection.isEmpty || model.isTransferring)
+        // 树形里「向指定文件夹添加」：只在这个文件夹上右键时出现
+        if item.isFolderLike {
+            Menu(L("在此文件夹中新建", "New Inside Folder")) {
+                Button(L("文件夹", "Folder")) {
+                    model.createFolder(in: item.url)
+                }
+                Divider()
+                ForEach(NewFileKind.allCases) { kind in
+                    Button(kind.displayName) {
+                        model.createFile(kind, in: item.url)
+                    }
+                }
+            }
+        }
         if inSelection && model.selection.count > 1 {
             Button(L("复制 \(model.selection.count) 项路径", "Copy Paths of \(model.selection.count) Items")) {
                 model.copySelectedPaths()
@@ -685,7 +713,7 @@ struct FileListView: View {
         Divider()
         Button(L("移到废纸篓", "Move to Trash")) {
             if !inSelection { model.selectOnly(item) }
-            model.moveSelectionToTrash()
+            model.requestTrash()
         }
         Button(L("彻底删除…", "Delete Immediately…")) {
             if !inSelection { model.selectOnly(item) }
@@ -877,12 +905,21 @@ struct FileRow: View {
     let widths: ColumnWidths
     /// 奇数行底色（访达式交替条纹）
     var isStriped: Bool = false
+    /// 缩进层级（树形列表）
+    var depth: Int = 0
+    /// 该文件夹是否已展开
+    var isExpanded: Bool = false
+    /// 子项正在后台读取
+    var isTreeLoading: Bool = false
+    var onToggleExpand: (() -> Void)?
 
     @State private var hovered = false
 
     var body: some View {
         FileListLayout.row(widths: widths) {
-            HStack(spacing: 7) {
+            HStack(spacing: 6) {
+                // 展开三角：只有文件夹才有，叶子用等宽空白占位保持对齐
+                disclosure
                 FileItemIcon(item: item, size: 16)
 
                 if isRenaming {
@@ -897,6 +934,9 @@ struct FileRow: View {
                     Spacer(minLength: 0)
                 }
             }
+            // 缩进用 padding 而不是占位视图：不会额外引入 HStack 的 spacing，
+            // 层级之间的距离才是精确的固定值
+            .padding(.leading, CGFloat(depth) * FileListLayout.treeIndent)
         } size: {
             Text(model.sizeText(for: item))
                 .font(.system(size: 12).monospacedDigit())
@@ -944,6 +984,40 @@ struct FileRow: View {
         }
         .onHover { hovered = $0 }
         .help(helpText)
+    }
+
+    /// 展开 / 折叠三角（adr/0019）。
+    /// 点它只切换展开状态，不改变选中 —— 和访达一致。
+    @ViewBuilder
+    private var disclosure: some View {
+        if item.isDirectory && item.isAccessible {
+            Button {
+                onToggleExpand?()
+            } label: {
+                ZStack {
+                    if isTreeLoading {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .scaleEffect(0.6)
+                    } else {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8, weight: .bold))
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    }
+                }
+                .frame(width: FileListLayout.treeDisclosureWidth,
+                       height: FileListLayout.treeDisclosureWidth)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(isSelected ? Color.white.opacity(0.85) : Color.secondary)
+            .animation(.easeInOut(duration: 0.12), value: isExpanded)
+            .help(isExpanded ? L("折叠", "Collapse") : L("展开", "Expand"))
+        } else {
+            Color.clear
+                .frame(width: FileListLayout.treeDisclosureWidth,
+                       height: FileListLayout.treeDisclosureWidth)
+        }
     }
 
     /// 悬停提示：未授权项直接说清楚"打开时会提示授权"，避免用户以为是坏了

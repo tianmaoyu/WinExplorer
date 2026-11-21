@@ -166,7 +166,7 @@ struct ExplorerCommands: Commands {
             Divider()
 
             Button(L("移到废纸篓", "Move to Trash")) {
-                model.moveSelectionToTrash()
+                model.requestTrash()
             }
             .keyboardShortcut(KeyEquivalent("\u{8}"), modifiers: .command)
             .disabled(!model.hasSelection)

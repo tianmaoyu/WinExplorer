@@ -63,8 +63,16 @@ struct BrowserView: View {
             if let targets = model.pendingPermanentDelete {
                 DeleteConfirmView(
                     items: targets,
+                    mode: .permanent,
                     onCancel: { model.cancelPermanentDelete() },
                     onConfirm: { model.confirmPermanentDelete() }
+                )
+            } else if let targets = model.pendingTrash {
+                DeleteConfirmView(
+                    items: targets,
+                    mode: .trash,
+                    onCancel: { model.cancelTrash() },
+                    onConfirm: { model.confirmTrash() }
                 )
             }
         }
@@ -256,7 +264,7 @@ struct BrowserView: View {
             if flags.contains(.shift) {
                 model.requestPermanentDelete()
             } else {
-                model.moveSelectionToTrash()
+                model.requestTrash()
             }
             return true
         }
@@ -397,7 +405,9 @@ struct BrowserView: View {
             .disabled(!model.canPaste || model.isTransferring)
             .help(L("粘贴到当前文件夹（⌘V）", "Paste into this folder (⌘V)"))
 
-            Button(action: model.createFolder) {
+            Button {
+                model.createFolder()
+            } label: {
                 Label(L("新建文件夹", "New Folder"), systemImage: "folder.badge.plus")
             }
             .help(L("新建文件夹（⇧⌘N）", "New Folder (⇧⌘N)"))

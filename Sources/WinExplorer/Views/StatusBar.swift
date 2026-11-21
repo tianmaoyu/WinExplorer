@@ -69,11 +69,26 @@ struct StatusBar: View {
 
             Spacer(minLength: 12)
 
-            Text(model.currentURL.path)
-                .font(.system(size: 10.5))
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-                .truncationMode(.head)
+            // 选中单个节点时显示它的完整路径（根 → 当前层级），
+            // 没选中时显示当前目录（adr/0019）
+            if model.selection.count == 1, let item = model.selectedItems.first {
+                Image(systemName: item.isDirectory ? "folder" : "doc")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                Text(item.url.standardizedFileURL.path)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                    .textSelection(.enabled)
+                    .help(item.url.standardizedFileURL.path)
+            } else {
+                Text(model.currentURL.path)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            }
         }
         .padding(.horizontal, 12)
         .frame(height: 24)

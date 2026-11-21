@@ -44,6 +44,19 @@ final class BrowserModel: ObservableObject {
     @Published private(set) var isLoadingDirectory = false
     /// 目录监听触发的自动刷新正在进行（同一时刻只允许一次）
     private var isRefreshing = false
+
+    // MARK: - 树形展开（adr/0019）
+
+    /// 已展开的文件夹。折叠时会把它的所有后代一起移出，
+    /// 否则重新展开这个文件夹时，里面的子节点会「记着」上次是展开的。
+    @Published private(set) var expandedPaths: Set<String> = []
+    /// 展开过的文件夹里有什么（key: 标准化路径）。
+    /// 读过的空目录也会写进来（空数组），用来区分「没读过」和「读了但没有」。
+    private var treeChildren: [String: [FileItem]] = [:]
+    /// 正在后台读取的文件夹（行上显示小转圈）
+    @Published private(set) var loadingTreePaths: Set<String> = []
+    /// 扁平化后的可见行：`LazyVStack` 直接渲染这个
+    @Published private(set) var treeRows: [TreeRow] = []
     @Published var flash: String?
 
     /// 多选集合
@@ -59,6 +72,8 @@ final class BrowserModel: ObservableObject {
     @Published private(set) var renamingURL: URL?
     /// 等待用户确认的"彻底删除"目标
     @Published private(set) var pendingPermanentDelete: [FileItem]?
+    /// 待确认的「移到废纸篓」：文件夹会连子项一起进废纸篓，先把数量说清楚（adr/0019）
+    @Published private(set) var pendingTrash: [FileItem]?
 
     /// 批量重命名编辑态（nil 表示面板关闭）
     @Published var batchRename: BatchRenameState?
@@ -738,7 +753,10 @@ final class BrowserModel: ObservableObject {
             pathError = nil
             closeInfo()
             Preferences.lastDirectoryPath = url.path
+            // 树形：换目录整棵树重来；同目录刷新则保留「哪些文件夹展开着」但重读内容
+            invalidateTreeCache(keepingExpansion: !directoryChanged)
             applySortAndFilter()
+            reloadExpandedSubtrees()
             refreshFolderSizes()
             watchDirectory(url)
             // 预热「打开方式」候选：右键时只读缓存，不会卡住菜单（adr/0016）
@@ -795,6 +813,181 @@ final class BrowserModel: ObservableObject {
         if let anchor = anchorURL, !visibleURLs.contains(anchor) {
             anchorURL = nil
         }
+        rebuildTreeRows()
+    }
+
+    // MARK: - 树形展开（adr/0019）
+
+    /// 搜索时退化成扁平列表：搜索本来就只针对当前层，
+    /// 树形展开会让「搜索到底搜不搜子层」变得含糊，这里不引入歧义。
+    private var usesTreeLayout: Bool { searchQuery.isEmpty }
+
+    /// 展开 / 折叠一个文件夹
+    func toggleExpanded(_ url: URL) {
+        // 一律用标准化后的 **路径字符串** 当键：URL 的相等性会被
+        // /tmp 与 /private/tmp、末尾斜杠这类差异破坏，而 path 是确定的
+        let key = Self.treeKey(url)
+        if expandedPaths.contains(key) {
+            // 连同所有后代一起收起：否则下次展开时子节点会「记着」自己是展开的
+            let prefix = key + "/"
+            expandedPaths = expandedPaths.filter { $0 != key && !$0.hasPrefix(prefix) }
+        } else {
+            expandedPaths.insert(key)
+            ensureChildrenLoaded(url)
+        }
+        RunLog.shared.log(.user, "树形展开变更 count=\(expandedPaths.count) rows=\(treeRows.count) \(key)")
+        rebuildTreeRows()
+    }
+
+    /// 某个文件夹是否展开
+    func isExpanded(_ url: URL) -> Bool {
+        expandedPaths.contains(Self.treeKey(url))
+    }
+
+    /// 子项是否正在读取（视图上显示小转圈）
+    func isTreeLoading(_ url: URL) -> Bool {
+        loadingTreePaths.contains(Self.treeKey(url))
+    }
+
+    private static func treeKey(_ url: URL) -> String {
+        url.standardizedFileURL.path
+    }
+
+    /// 读某个文件夹的子项（已有缓存就直接用）
+    private func ensureChildrenLoaded(_ url: URL) {
+        let key = Self.treeKey(url)
+        guard treeChildren[key] == nil, !loadingTreePaths.contains(key) else { return }
+        loadingTreePaths.insert(key)
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = Result { try FileSystemService.contents(of: url) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.loadingTreePaths.remove(key)
+                switch result {
+                case .success(let children):
+                    self.treeChildren[key] = children
+                case .failure(let error):
+                    RunLog.shared.log(.load, "展开目录失败 \(url.path) err=\(error.localizedDescription)")
+                    // 记为「读过但没有」：免得每次重建都再发起一次必然失败的读取
+                    self.treeChildren[key] = []
+                }
+                if self.expandedPaths.contains(key) {
+                    self.rebuildTreeRows()
+                    // 刚新建/移动进来的项可能就在这一层，读完顺手选中它
+                    if self.pendingRevealURL != nil { self.applyPendingReveal() }
+                }
+            }
+        }
+    }
+
+    /// 扁平化：当前层的可见项按顺序排开，展开的文件夹后面紧跟着它的子项
+    private func rebuildTreeRows() {
+        guard usesTreeLayout else {
+            treeRows = items.map { TreeRow(item: $0, depth: 0, isExpanded: false) }
+            return
+        }
+        var rows: [TreeRow] = []
+        appendRows(from: items, depth: 0, into: &rows)
+        treeRows = rows
+        if ProcessInfo.processInfo.environment["WINEXPLORER_TREE_DEBUG"] == "1" {
+            let dump = rows.prefix(20).map { "\(String(repeating: "  ", count: $0.depth))\($0.item.name)" }
+            print("[Tree] rows=\(rows.count): " + dump.joined(separator: " | "))
+        }
+
+    }
+
+    private func appendRows(from source: [FileItem], depth: Int, into rows: inout [TreeRow]) {
+        // 深度兜底：符号链接指回祖先时不会把栈打爆
+        guard depth < 24 else { return }
+        for item in source {
+            let key = Self.treeKey(item.url)
+            let expanded = expandedPaths.contains(key)
+            rows.append(TreeRow(item: item, depth: depth, isExpanded: expanded))
+            guard expanded, item.isDirectory,
+                  let children = treeChildren[key],
+                  !children.isEmpty else { continue }
+            appendRows(from: displayable(children), depth: depth + 1, into: &rows)
+        }
+    }
+
+    /// 子层沿用当前目录那套过滤与排序（隐藏项 / 搜索词 / 排序方式）
+    private func displayable(_ source: [FileItem]) -> [FileItem] {
+        var visible = source
+        if !showHidden { visible = visible.filter { !$0.isHidden } }
+        let query = searchQuery
+        if !query.isEmpty { visible = visible.filter { $0.name.localizedStandardContains(query) } }
+        guard !visible.isEmpty else { return visible }
+        return FileSystemService.sort(visible, by: sortColumn, ascending: sortAscending)
+    }
+
+    /// 文件系统改动后让子树缓存失效。
+    /// - `keepingExpansion == true`：保留哪些文件夹是展开的，把内容重读一遍（同目录刷新）
+    /// - `keepingExpansion == false`：连展开状态一起清掉（换了目录）
+    private func invalidateTreeCache(keepingExpansion: Bool) {
+        treeChildren.removeAll()
+        guard keepingExpansion else {
+            expandedPaths.removeAll()
+            return
+        }
+        // 被删掉的文件夹不能继续留在展开集合里：否则每次刷新都会去读一个
+        // 已经不存在的路径，而且「折叠父级」时还会留下幽灵节点
+        let fm = FileManager.default
+        expandedPaths = expandedPaths.filter { fm.fileExists(atPath: $0) }
+    }
+
+    /// 把已展开的目录重新读一遍（刷新后子树内容可能变了）
+    private func reloadExpandedSubtrees() {
+        for path in expandedPaths { ensureChildrenLoaded(URL(fileURLWithPath: path)) }
+    }
+
+    /// 一次文件系统改动（新建 / 移动）后的收尾：
+    /// 改在**当前目录**里就重读并选中；改在**子文件夹**里就把它展开、重读、
+    /// 等子项回来后自动选中（`pendingRevealURL` 那条线）。
+    private func finishMutation(in directory: URL, revealing target: URL? = nil) {
+        let root = currentURL.standardizedFileURL
+        if directory.standardizedFileURL.path == root.path {
+            reload()
+            if let target { focus(url: target, scroll: false) }
+            return
+        }
+        expandedPaths.insert(Self.treeKey(directory))
+        treeChildren[Self.treeKey(directory)] = nil
+        if let target { pendingRevealURL = target.standardizedFileURL }
+        ensureChildrenLoaded(directory)
+        rebuildTreeRows()
+    }
+
+    /// 把从当前目录到 `url` 的所有祖先都展开，并让它们重读内容。
+    /// 用于「新建在子文件夹里」「移动到子文件夹」之后把结果露出来。
+    func revealAncestors(of url: URL) {
+        let root = currentURL.standardizedFileURL
+        let target = url.standardizedFileURL.deletingLastPathComponent()
+        guard target.path != root.path, target.path.hasPrefix(root.path + "/") else { return }
+
+        // 从直接父目录一路往上，收集到当前目录为止
+        var chain: [URL] = []
+        var cursor = target
+        while cursor.path != root.path, cursor.path.hasPrefix(root.path) {
+            chain.append(cursor)
+            let parent = cursor.deletingLastPathComponent()
+            if parent.path == cursor.path { break }
+            cursor = parent
+        }
+        guard !chain.isEmpty else { return }
+        for dir in chain { expandedPaths.insert(Self.treeKey(dir)) }
+        // 这些目录的内容需要重读（刚写进去的东西不在旧缓存里）
+        for dir in chain { treeChildren[Self.treeKey(dir)] = nil }
+        for dir in chain { ensureChildrenLoaded(dir) }
+        rebuildTreeRows()
+    }
+
+    /// 全部收起（切到列表 / 图标视图时用，那时不展示层级）
+    func collapseAllTreeNodes() {
+        guard !expandedPaths.isEmpty else { return }
+        expandedPaths.removeAll()
+        treeChildren.removeAll()
+        rebuildTreeRows()
     }
 
     // MARK: - 文件夹大小
@@ -892,7 +1085,9 @@ final class BrowserModel: ObservableObject {
             directorySignature = signature
             allItems = loaded
             invalidateSortCache()
+            invalidateTreeCache(keepingExpansion: true)
             applySortAndFilter()
+            reloadExpandedSubtrees()
             refreshFolderSizes()
             prefetchOpenWithForVisibleItems()
         } catch {
@@ -989,7 +1184,9 @@ final class BrowserModel: ObservableObject {
     /// 注意：枚举出来的目录 URL 可能带尾斜杠，这里按标准化路径匹配，不能直接比 URL。
     func focus(url: URL, scroll: Bool = true) {
         let targetPath = url.standardizedFileURL.path
-        guard let match = items.first(where: { $0.url.standardizedFileURL.path == targetPath }) else {
+        // 树形展开后，目标可能在某个子层里，所以先在可见行里找
+        let pool = usesTreeLayout ? treeRows.map(\.item) : items
+        guard let match = pool.first(where: { $0.url.standardizedFileURL.path == targetPath }) else {
             return
         }
         selection = [match.url]
@@ -1613,6 +1810,40 @@ final class BrowserModel: ObservableObject {
         execute(requests: requests, targetDir: targetDir, clearsClipboard: mode == .cut)
     }
 
+    /// 「移动到…」：选一个目标文件夹，把选中项移过去（adr/0019）
+    func chooseMoveDestination() {
+        let targets = selectedItems
+        guard !targets.isEmpty else { return }
+        if blockedByUnauthorized(targets) { return }
+
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.prompt = L("移动到这里", "Move Here")
+        panel.message = L("选择要把 \(targets.count) 个项目移动到的文件夹",
+                          "Choose a folder to move \(targets.count) item(s) into")
+        panel.directoryURL = currentURL
+        guard panel.runModal() == .OK, let destination = panel.url?.standardizedFileURL else { return }
+        moveItems(targets.map(\.url), to: destination)
+    }
+
+    /// 把一批项移动到指定目录。复用拖放的传输通道（强制移动），
+    /// 目标非法（比如移进它自己）时由 `drop` 里的校验拦下。
+    func moveItems(_ urls: [URL], to destination: URL) {
+        guard !urls.isEmpty else { return }
+        let dest = destination.standardizedFileURL
+        let sameParent = urls.allSatisfy {
+            $0.deletingLastPathComponent().standardizedFileURL.path == dest.path
+        }
+        guard !sameParent else {
+            showFlash(L("它们已经在这个文件夹里了", "They’re already in this folder"))
+            return
+        }
+        drop(urls: urls, into: dest, modifiers: [.command])
+    }
+
     /// 拖放：把一批 URL 放进 target 目录。
     /// 规则和 Windows 一致：⌥ 强制复制、⌘ 强制移动，否则同卷移动、跨卷复制。
     func drop(urls: [URL], into targetDir: URL, modifiers: NSEvent.ModifierFlags) {
@@ -2173,7 +2404,8 @@ final class BrowserModel: ObservableObject {
     private func applyPendingReveal() {
         guard let target = pendingRevealURL else { return }
         let path = target.path
-        guard let match = items.first(where: { $0.url.standardizedFileURL.path == path }) else { return }
+        let pool = usesTreeLayout ? treeRows.map(\.item) : items
+        guard let match = pool.first(where: { $0.url.standardizedFileURL.path == path }) else { return }
         pendingRevealURL = nil
         selection = [match.url]
         focusedURL = match.url
@@ -2190,8 +2422,30 @@ final class BrowserModel: ObservableObject {
     // MARK: - 删除
 
     /// 移到废纸篓（可恢复）
-    func moveSelectionToTrash() {
+    /// 菜单入口：先登记，等确认框（列出级联影响）再真正执行
+    func requestTrash() {
         let targets = selectedItems
+        guard !targets.isEmpty else { return }
+        if blockedByUnauthorized(targets) { return }
+        pendingTrash = targets
+    }
+
+    func cancelTrash() {
+        pendingTrash = nil
+    }
+
+    func confirmTrash() {
+        guard let targets = pendingTrash else { return }
+        pendingTrash = nil
+        moveSelectionToTrash(targets)
+    }
+
+    /// 直接执行（撤销、自检用）
+    func moveSelectionToTrash() {
+        moveSelectionToTrash(selectedItems)
+    }
+
+    private func moveSelectionToTrash(_ targets: [FileItem]) {
         guard !targets.isEmpty else { return }
         if blockedByUnauthorized(targets) { return }
 
@@ -2302,15 +2556,19 @@ final class BrowserModel: ObservableObject {
     }
 
     /// 新建文件夹，重名时自动加序号（Windows 的"新建文件夹 2"习惯）
-    func createFolder() {
+    /// 新建文件夹。
+    /// `directory` 只在「右键某个文件夹 → 在此文件夹中新建」时传入；
+    /// 快捷键和工具栏按钮一律建在当前目录 —— 否则连续新建会一层层嵌套下去。
+    func createFolder(in directory: URL? = nil) {
         let fm = FileManager.default
+        let base = (directory ?? currentURL).standardizedFileURL
         var name = L("新建文件夹", "New Folder")
         var index = 2
-        var target = currentURL.appendingPathComponent(name)
+        var target = base.appendingPathComponent(name)
 
         while fm.fileExists(atPath: target.path) {
             name = "\(L("新建文件夹", "New Folder")) \(index)"
-            target = currentURL.appendingPathComponent(name)
+            target = base.appendingPathComponent(name)
             index += 1
         }
 
@@ -2337,8 +2595,7 @@ final class BrowserModel: ObservableObject {
                     }
                 }
             ))
-            reload()
-            focus(url: target.standardizedFileURL, scroll: false)
+            finishMutation(in: base, revealing: target)
             showFlash(L("已新建「\(name)」", "Created “\(name)”"))
         } catch {
             errorMessage = L("新建文件夹失败：\(error.localizedDescription)", "Couldn’t create the folder: \(error.localizedDescription)")
@@ -2349,15 +2606,16 @@ final class BrowserModel: ObservableObject {
 
     /// 在当前目录创建一个新文件，重名自动编号，创建完直接进行内重命名。
     /// 文本类初始为空；RTF 由 AppKit 生成；Office 三件套写入内嵌的最小空白包。
-    func createFile(_ kind: NewFileKind) {
+    func createFile(_ kind: NewFileKind, in destination: URL? = nil) {
         let fm = FileManager.default
+        let directory = (destination ?? currentURL).standardizedFileURL
         let base = kind.defaultBaseName
         var name = "\(base).\(kind.fileExtension)"
         var index = 2
-        var target = currentURL.appendingPathComponent(name)
+        var target = directory.appendingPathComponent(name)
         while fm.fileExists(atPath: target.path) {
             name = "\(base) \(index).\(kind.fileExtension)"
-            target = currentURL.appendingPathComponent(name)
+            target = directory.appendingPathComponent(name)
             index += 1
         }
 
@@ -2398,13 +2656,12 @@ final class BrowserModel: ObservableObject {
                     }
                 }
             ))
-            reload()
-            focus(url: target.standardizedFileURL, scroll: false)
+            finishMutation(in: directory, revealing: target)
             showFlash(L("已新建「\(name)」", "Created “\(name)”"))
-            // 和 Windows 一致：新建完立刻改名字
-            if let item = items.first(where: {
-                $0.url.standardizedFileURL == target.standardizedFileURL
-            }) {
+            // 和 Windows 一致：新建完立刻改名字（只对当前目录里能立刻定位到的项）
+            if let item = treeRows.first(where: {
+                $0.item.url.standardizedFileURL == target.standardizedFileURL
+            })?.item {
                 beginRename(item: item)
             }
         } catch {
