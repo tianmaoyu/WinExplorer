@@ -1166,11 +1166,17 @@ final class BrowserModel: ObservableObject {
         let shift = modifiers.contains(.shift)
         let command = modifiers.contains(.command)
 
-        if shift, let anchor = anchorURL, let from = index(of: anchor), let to = index(of: item.url) {
+        // Shift 范围选择：下标与取值必须来自**同一个数组**（adr/0023）。
+        // `index(of:)` 查的是 visibleItems，这里却曾经用 items 取切片 ——
+        // 树形展开后两者长度不同，轻则选错一片、重则数组越界。
+        if shift, let anchor = anchorURL,
+           let from = index(of: anchor), let to = index(of: item.url) {
             let lower = min(from, to)
             let upper = max(from, to)
-            selection = Set(items[lower...upper].map(\.url))
+            guard upper < visibleItems.count else { return }
+            selection = Set(visibleItems[lower...upper].map(\.url))
             focusedURL = item.url
+            // 锚点保持不变：继续按 Shift 点更远的项时，范围仍然从最初那个锚点算起
             return
         }
 

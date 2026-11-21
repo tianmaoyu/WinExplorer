@@ -110,4 +110,5 @@
 | **items / rows** | 数据侧可见项数 与 界面侧行数；两者对不上就是「看不到文件」的直接证据，已进运行日志采样 | `BrowserModel.diagnosticsSummary` |
 | **展开即重读** | 展开文件夹时强制重读磁盘（而不是复用上次的缓存），保证拖拽移动后能看到新内容 | `BrowserModel.toggleExpanded`（adr/0021） |
 | **可见项** | 与界面行一一对应的文件项数组（树形展开后的完整列表）；操作层查选中项必须用它，不能用 `items` | `BrowserModel.visibleItems`（adr/0022） |
+| **范围选择** | Shift 点击以锚点为准选中可见行的一段；下标与取值必须同源（`visibleItems`），否则越界或错位 | `BrowserModel.handleClick`（adr/0023） |
 

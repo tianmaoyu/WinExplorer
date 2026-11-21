@@ -11,6 +11,8 @@ enum SelfTest {
         BrowserModel.syncsSystemPasteboard = false
         BrowserModel.runsTransfersSynchronously = true
         BrowserModel.computesFolderSizeSynchronously = true
+        // 行缓冲：输出重定向到文件时也能看到崩溃前的进度
+        setvbuf(stdout, nil, _IOLBF, 0)
         BrowserModel.watchesFileSystem = false
         // 搜索防抖会让「设完 searchText 立刻断言」失效，自检里关掉
         BrowserModel.debouncesSearch = false
@@ -1548,6 +1550,196 @@ enum SelfTest {
         }
         model.toggleExpanded(deepInner)
         model.toggleExpanded(deepDir)
+
+        // MARK: 树形结构全面回归（adr/0023）
+        // 全部用真实文件和文件夹：/tmp 下建一棵有嵌套、有同级、有空目录的树
+        let full = root.appendingPathComponent("treefull")
+        let alpha = full.appendingPathComponent("alpha")
+        let beta = alpha.appendingPathComponent("beta")
+        let gamma = beta.appendingPathComponent("gamma")
+        let emptyDir = alpha.appendingPathComponent("empty")
+        let secondBranch = full.appendingPathComponent("second")
+        let thirdItem = full.appendingPathComponent("third.txt")
+        try? fm.createDirectory(at: gamma, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: emptyDir, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: secondBranch, withIntermediateDirectories: true)
+        fm.createFile(atPath: gamma.appendingPathComponent("leaf.txt").path, contents: Data("x".utf8))
+        fm.createFile(atPath: beta.appendingPathComponent("delta.txt").path, contents: Data("x".utf8))
+        fm.createFile(atPath: thirdItem.path, contents: Data("x".utf8))
+
+        model.navigate(to: full)
+        check("树全面：顶层三项（文件夹优先）", model.treeRows.count == 3,
+              "rows=\(model.treeRows.map(\.item.name))")
+
+        // 展开 alpha：同级 beta 和 empty 一起出现
+        model.toggleExpanded(alpha)
+        waitForChildren(alpha)
+        check("树全面：展开 alpha 后是 5 行", model.treeRows.count == 5,
+              "rows=\(model.treeRows.map { "\($0.item.name)@\($0.depth)" })")
+        check("树全面：同级节点缩进一致",
+              model.treeRows.filter { $0.depth == 1 }.count == 2)
+
+        // 展开 beta：第三层出现
+        model.toggleExpanded(beta)
+        waitForChildren(beta)
+        check("树全面：三层嵌套共 7 行", model.treeRows.count == 7,
+              "rows=\(model.treeRows.map { "\($0.item.name)@\($0.depth)" })")
+        check("树全面：第三层有两个子项",
+              model.treeRows.filter { $0.depth == 2 }.count == 2)
+
+        // 空目录：展开后行数不变，也不能崩
+        let rowsBeforeEmpty = model.treeRows.count
+        model.toggleExpanded(emptyDir)
+        waitForChildren(emptyDir)
+        check("树全面：展开空目录不增加行", model.treeRows.count == rowsBeforeEmpty,
+              "before=\(rowsBeforeEmpty) after=\(model.treeRows.count)")
+        check("树全面：空目录被标记为展开", model.isExpanded(emptyDir))
+
+        // MARK: 选择
+        // 可见行顺序（深度优先）。gamma 还没展开，所以 leaf.txt 此时不在列表里
+        let expectedOrder = ["alpha", "beta", "gamma", "delta.txt", "empty", "second", "third.txt"]
+        check("树全面：可见行顺序正确",
+              model.visibleItems.map(\.name) == expectedOrder,
+              "实际 \(model.visibleItems.map(\.name))")
+
+        // 后续一切按名字定位，不硬编码下标（写死下标一旦行数变化就会越界崩溃）
+        func idx(_ name: String) -> Int? {
+            model.visibleItems.firstIndex { $0.name == name }
+        }
+        // 选中集合里存的是原始 URL，比较时必须先标准化（/tmp 与 /private/tmp 之类）
+        func isSelected(_ url: URL) -> Bool {
+            let path = url.standardizedFileURL.path
+            return model.selection.contains { $0.standardizedFileURL.path == path }
+        }
+        let iAlpha = idx("alpha")
+        let iBeta = idx("beta")
+        let iEmpty = idx("empty")
+        let iSecond = idx("second")
+        let iThird = idx("third.txt")
+        check("树全面：关键节点都能在可见行里定位",
+              iAlpha != nil && iBeta != nil && iEmpty != nil && iSecond != nil && iThird != nil)
+
+        if let iAlpha, let iBeta, let iEmpty, let iSecond, let iThird {
+            // 点击单选
+            model.handleClick(on: model.visibleItems[iAlpha], modifiers: [])
+            check("选择：点击单选只选一项", model.selection.count == 1)
+
+            // Shift 正向跨层级：alpha → third.txt（含中间所有子层节点）
+            model.handleClick(on: model.visibleItems[iThird], modifiers: [.shift])
+            check("选择：Shift 正向跨层级连续选中",
+                  model.selection.count == model.visibleItems.count,
+                  "选中 \(model.selection.count) 项，应为 \(model.visibleItems.count)")
+            check("选择：范围包含中间的子层节点",
+                  isSelected(gamma) && isSelected(beta.appendingPathComponent("delta.txt")))
+
+            // Shift 反向：third.txt → alpha
+            model.handleClick(on: model.visibleItems[iThird], modifiers: [])
+            model.handleClick(on: model.visibleItems[iAlpha], modifiers: [.shift])
+            check("选择：Shift 反向也能连续选中",
+                  model.selection.count == model.visibleItems.count,
+                  "选中 \(model.selection.count) 项")
+
+            // Shift 局部范围：beta → empty（跨一层与两层）
+            model.handleClick(on: model.visibleItems[iBeta], modifiers: [])
+            model.handleClick(on: model.visibleItems[iEmpty], modifiers: [.shift])
+            let lower = min(iBeta, iEmpty)
+            let upper = max(iBeta, iEmpty)
+            let partial = Set(model.visibleItems[lower...upper].map(\.url))
+            check("选择：局部 Shift 范围精确",
+                  model.selection == partial,
+                  "选中 \(model.selection.count) 项，应为 \(partial.count)")
+
+            // ⌘ 加选 / 减选
+            model.handleClick(on: model.visibleItems[iAlpha], modifiers: [])
+            model.handleClick(on: model.visibleItems[iSecond], modifiers: [.command])
+            check("选择：⌘ 加选", model.selection.count == 2)
+            model.handleClick(on: model.visibleItems[iSecond], modifiers: [.command])
+            check("选择：⌘ 再点一次取消该项", model.selection.count == 1)
+
+            // 键盘：↑↓ 在可见行之间移动（能跨层级）
+            model.selectOnly(model.visibleItems[iAlpha])
+            model.moveFocus(by: 1)
+            check("选择：键盘下移进入子层",
+                  model.focusedURL?.standardizedFileURL.path == beta.standardizedFileURL.path,
+                  "焦点 \(model.focusedURL?.lastPathComponent ?? "nil")")
+            model.moveFocus(by: -1)
+            check("选择：键盘上移回到父级",
+                  model.focusedURL?.standardizedFileURL.path == alpha.standardizedFileURL.path,
+                  "焦点 \(model.focusedURL?.lastPathComponent ?? "nil")")
+        }
+
+        // MARK: 增删改移后的状态同步
+        // leaf.txt 在第三层，先展开 gamma 才能看到它
+        model.toggleExpanded(gamma)
+        waitForChildren(gamma)
+        check("状态同步：展开第三层后能看到 leaf.txt",
+              model.treeRows.contains { $0.item.name == "leaf.txt" },
+              "rows=\(model.treeRows.map(\.item.name))")
+
+        // 重命名子层里的文件
+        if let leaf = model.treeRows.first(where: { $0.item.name == "leaf.txt" })?.item {
+            model.beginRename(item: leaf)
+            let renamed = model.commitRename("leaf-renamed.txt")
+            waitForChildren(gamma)
+            check("状态同步：重命名成功", renamed)
+            check("状态同步：可见行里是新名字",
+                  model.treeRows.contains { $0.item.name == "leaf-renamed.txt" },
+                  "rows=\(model.treeRows.map(\.item.name))")
+            check("状态同步：旧名字不再出现",
+                  !model.treeRows.contains { $0.item.name == "leaf.txt" })
+        } else {
+            check("状态同步：能定位到子层的 leaf.txt", false)
+        }
+
+        // 在子文件夹里新建文件（右键「在此文件夹中新建」走的就是这条）
+        model.createFile(.text, in: gamma)
+        let createdName = "\(L("新建文本文档", "New Text Document")).txt"
+        check("状态同步：新建落在子文件夹里",
+              fm.fileExists(atPath: gamma.appendingPathComponent(createdName).path))
+        waitForChildren(gamma)
+        check("状态同步：新建的文件出现在可见行",
+              model.treeRows.contains { $0.item.name == createdName },
+              "rows=\(model.treeRows.map(\.item.name))")
+        model.cancelRename()
+
+        // 删掉子层的一个文件，可见行同步
+        if let created = model.treeRows.first(where: { $0.item.name == createdName })?.item {
+            model.selectOnly(created)
+            model.requestTrash()
+            model.confirmTrash()
+            waitForChildren(gamma)
+            check("状态同步：删除后可见行不再有它",
+                  !model.treeRows.contains { $0.item.name == createdName })
+            check("状态同步：删除后选中集合清空", model.selection.isEmpty)
+        }
+
+        // 折叠父级：后代全部收起，只剩顶层
+        model.toggleExpanded(alpha)
+        check("树全面：折叠父级后回到 3 行", model.treeRows.count == 3,
+              "rows=\(model.treeRows.count)")
+        check("树全面：折叠后展开集合为空", model.expandedPaths.isEmpty)
+
+        // MARK: 大量节点
+        let bulk = root.appendingPathComponent("treebulk")
+        try? fm.createDirectory(at: bulk, withIntermediateDirectories: false)
+        for index in 1...300 {
+            fm.createFile(atPath: bulk.appendingPathComponent(String(format: "f%03d.txt", index)).path,
+                          contents: Data("x".utf8))
+        }
+        model.navigate(to: bulk)
+        check("大量节点：300 个文件全部进可见行", model.treeRows.count == 300,
+              "rows=\(model.treeRows.count)")
+        model.selectAll()
+        check("大量节点：全选覆盖 300 项", model.selection.count == 300,
+              "selected=\(model.selection.count)")
+        if let last = model.visibleItems.last {
+            model.handleClick(on: model.visibleItems[0], modifiers: [])
+            model.handleClick(on: last, modifiers: [.shift])
+            check("大量节点：Shift 跨全部行不错位",
+                  model.selection.count == model.visibleItems.count,
+                  "selected=\(model.selection.count)/\(model.visibleItems.count)")
+        }
+        model.navigate(to: root)
 
         // 搜索时退化为扁平：只匹配当前层，不跨层展开
         model.toggleExpanded(treeSub)
