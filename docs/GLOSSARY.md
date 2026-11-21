@@ -86,3 +86,4 @@
 | **文件夹大小协调者** | 文件夹大小统计的任务生命周期、缓存命中、后台计算与进度回填（从 BrowserModel 拆出） | `FolderSizeCoordinator`（adr/0011） |
 | **排序缓存** | 缓存全量排序结果；过滤不改变相对顺序，敲搜索词时只做线性过滤不重排 | `BrowserModel.sortedCache` |
 | **搜索防抖** | 搜索输入停 0.18s 后才过滤，避免每个字符都全量过滤+排序 | `BrowserModel.debouncesSearch` |
+| **图标异步化** | 列表行不在 body 里同步问系统要图标：先占位，后台队列生成后回填；同步入口只留给一次画一两个的地方 | `IconProvider.iconAsync(for:)`（adr/0012） |

@@ -1409,6 +1409,12 @@ enum SelfTest {
         check("类型描述：同扩展名结果一致且有内容",
               !kindA.isEmpty && kindA == kindB, "A=\(kindA) B=\(kindB)")
 
+        // 图标缓存：首次取过之后只查缓存就能拿到，且是同一个实例（不重复问系统）
+        IconProvider.shared.icon(for: txtA)
+        check("图标：取过之后能命中缓存", IconProvider.shared.cached(for: txtA) != nil)
+        check("图标：重复取返回同一实例",
+              IconProvider.shared.icon(for: txtA) === IconProvider.shared.icon(for: txtA))
+
         // 排序缓存：搜索过滤后再清空，顺序应与直接排序一致
         model.searchText = "small"
         model.searchText = ""

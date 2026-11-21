@@ -14,6 +14,9 @@ struct FileItemIcon: View {
     let item: FileItem
     let size: CGFloat
 
+    /// 异步取到的真实图标；nil 时显示占位
+    @State private var loadedIcon: NSImage?
+
     private var usesGenericIcon: Bool {
         !item.isAccessible || ProtectedPaths.shouldAvoidSystemIcon(item.url)
     }
@@ -25,12 +28,49 @@ struct FileItemIcon: View {
             : Color.accentColor.opacity(0.85)
     }
 
+    /// 触发一次图标加载的标识：路径或权限状态变了都要重新取
+    private var loadKey: String {
+        "\(item.url.path)#\(usesGenericIcon)"
+    }
+
     var body: some View {
+        content
+            // 图标一律异步取：`NSWorkspace.icon(forFile:)` 会读文件 + 问 LaunchServices，
+            // 放在 body 里同步调用会让「进大目录」卡一下（adr/0012）
+            .task(id: loadKey) {
+                guard !usesGenericIcon else {
+                    loadedIcon = nil
+                    return
+                }
+                // 缓存命中就不用起后台任务，首帧直接画真图标
+                if let cached = IconProvider.shared.cached(for: item.url) {
+                    loadedIcon = cached
+                    return
+                }
+                loadedIcon = nil
+                let image = await IconProvider.shared.iconAsync(for: item.url)
+                guard !Task.isCancelled else { return }
+                loadedIcon = image
+            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         if !usesGenericIcon {
-            Image(nsImage: IconProvider.shared.icon(for: item.url))
-                .resizable()
-                .interpolation(.high)
-                .frame(width: size, height: size)
+            if let loadedIcon {
+                Image(nsImage: loadedIcon)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: size, height: size)
+            } else {
+                // 占位：和真图标同尺寸同形状，取图期间不跳布局
+                Image(systemName: item.isDirectory ? "folder.fill" : "doc.fill")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: size * 0.86, height: size * 0.86)
+                    .foregroundStyle(Color.secondary.opacity(0.3))
+                    .frame(width: size, height: size)
+            }
         } else {
             Image(systemName: item.isDirectory ? "folder.fill" : "doc.fill")
                 .resizable()
