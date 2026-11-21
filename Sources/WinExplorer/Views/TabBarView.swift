@@ -11,7 +11,7 @@ import UniformTypeIdentifiers
 ///   拖到 `+` 上 = 新建一个标签并直接放入（adr/0006）
 struct TabBarView: View {
     @ObservedObject var tabs: TabsModel
-    static let height: CGFloat = 32
+    static let height: CGFloat = 34
 
     @State private var draggingID: UUID?
     /// 文件拖拽悬停的标签（蓝色描边反馈）
@@ -70,8 +70,8 @@ struct TabBarView: View {
             tabs.newTab()
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: 11, weight: .semibold))
-                .frame(width: 22, height: 20)
+                .font(.system(size: 12, weight: .semibold))
+                .frame(width: 24, height: 22)
                 .background {
                     RoundedRectangle(cornerRadius: 5)
                         .fill(Color.accentColor.opacity(plusTargeted ? 0.22 : 0))
@@ -107,11 +107,11 @@ private struct TabChip: View {
         HStack(spacing: 6) {
             Image(nsImage: IconProvider.shared.icon(for: tab.currentURL))
                 .resizable()
-                .frame(width: 13, height: 13)
+                .frame(width: 15, height: 15)
                 .opacity(isActive ? 1 : 0.75)
 
             Text(tab.titleText)
-                .font(.system(size: 11.5, weight: isActive ? .medium : .regular))
+                .font(.system(size: 13, weight: isActive ? .medium : .regular))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .foregroundStyle(isActive ? Color.primary : Color.secondary)
@@ -120,8 +120,8 @@ private struct TabChip: View {
             if showsClose {
                 Button(action: onClose) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .bold))
-                        .frame(width: 14, height: 14)
+                        .font(.system(size: 9, weight: .bold))
+                        .frame(width: 16, height: 16)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

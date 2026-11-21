@@ -14,6 +14,11 @@ struct BrowserView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .toolbar { toolbarContent }
+        // 让视图按钮组贴到窗口最右（SwiftUI 工具栏里做不到，见该文件注释）
+        .background {
+            ToolbarRightAlignFix()
+                .frame(width: 0, height: 0)
+        }
         .onAppear {
             SnapshotSupport.scheduleIfNeeded(model: model, tabs: tabs)
             installDragSource()
@@ -356,12 +361,18 @@ struct BrowserView: View {
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
-        // 标签栏常驻工具栏最左侧 —— Win11 资源管理器的形态（adr/0008 修订 adr/0006）：
-        // 标签 chip + 「+」永远可见，拖文件到 chip / + 也能传文件。
+        // 标签栏贴左（adr/0008）：chip + 「+」永远可见，拖文件到 chip / + 也能传文件。
         // 后退/前进/上一级按钮已移除，导航走「前往」菜单（⌘[ / ⌘] / ⌘↑）。
-        ToolbarItemGroup(placement: .navigation) {
+        //
+        // 注意：SwiftUI 的工具栏 item 只按「理想尺寸」布局 —— `Spacer` 与
+        // `maxWidth(.infinity)` 在这里都撑不开，`.primaryAction` 也不会自己跑到最右。
+        // 真正把按钮组顶到窗口最右边的是 ToolbarRightAlignFix 往 NSToolbar 里
+        // 插的那个 flexibleSpace（见 ToolbarRightAlignFix.swift 的说明）。
+        ToolbarItem(placement: .navigation) {
+            // 按内容宽度收缩（`.fixedSize`）：chip 与「+」紧挨着，右侧留白归弹性空白，
+            // 不要把一个固定宽的条子撑在中间（否则「+」会被推到离 chip 很远的地方）
             TabBarView(tabs: tabs)
-                .frame(maxWidth: 520)
+                .fixedSize(horizontal: true, vertical: false)
         }
 
         ToolbarItemGroup(placement: .primaryAction) {

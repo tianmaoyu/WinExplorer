@@ -69,10 +69,12 @@
 
 | 词 | 含义 | 对应代码 |
 |---|---|---|
-| **常驻标签栏** | 嵌在窗口工具栏中央（`.principal`）的标签 chips + `+`，单标签也显示 | `TabBarView` |
+| **常驻标签栏** | 嵌在窗口工具栏最左的标签 chips + `+`，单标签也显示（v1.4.1 起从居中改为贴左） | `TabBarView` |
 | **全局剪贴板** | 应用级共享的 `ClipboardStore`：⌘C 在标签 A / 窗口 A，切到 B 直接 ⌘V | `ClipboardStore` |
 | **悬停切换** | 拖文件悬停在 chip 上 0.6s 自动切到那个标签，松手落入其当前目录 | `TabsModel.scheduleAutoSwitch` |
 | **拖到 + 号** | 新建一个标签（沿用当前目录）并直接放入拖入的文件 | `TabsModel.receiveDropOnPlus` |
 | **独立窗口** | 每窗口一份 `TabsModel`（窗口层 `@StateObject`），⌘N 开新窗口 | `WindowRootView` |
 | **聚焦窗口菜单** | 菜单命令作用于聚焦窗口的标签组，用 `@FocusedObject` 取 | `ExplorerCommands.tabs: TabsModel?` |
 | **全窗口截图** | `WINEXPLORER_SNAPSHOT_FULL=1` 抓含标题栏 / 工具栏的完整窗口（contentView 不含 chrome） | `SnapshotSupport.capture` |
+| **弹性空白** | `NSToolbar` 的 `flexibleSpace` item：占住剩余宽度把后面的 item 顶到最右。SwiftUI 不暴露，只能经 AppKit 插入 | `ToolbarRightAlignFix` |
+| **工具栏定宽幻觉** | SwiftUI 工具栏 item 只按内容理想尺寸布局，`Spacer` / `maxWidth(.infinity)` 都撑不开 | `ToolbarRightAlignFix` 注释 |
