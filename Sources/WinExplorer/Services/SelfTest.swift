@@ -7,6 +7,10 @@ import Foundation
 /// 不弹窗、不碰用户数据。
 enum SelfTest {
     static func runAll() -> Never {
+        // 自检不碰系统剪贴板，复制/移动同步执行以便断言
+        BrowserModel.syncsSystemPasteboard = false
+        BrowserModel.runsTransfersSynchronously = true
+
         var failures = 0
 
         func check(_ name: String, _ condition: Bool, _ detail: String = "") {
@@ -196,6 +200,142 @@ enum SelfTest {
         check("确认后文件被删除", !fm.fileExists(atPath: victim.path))
         check("删除后清空待确认状态", model.pendingPermanentDelete == nil)
         check("临时目录外的文件未被触碰", fm.fileExists(atPath: sentinel.path))
+
+        // MARK: 剪贴板：复制 / 剪切 / 粘贴
+        let clipSrc = root.appendingPathComponent("剪贴板源")
+        let clipDst = root.appendingPathComponent("剪贴板目标")
+        try? fm.createDirectory(at: clipSrc, withIntermediateDirectories: false)
+        try? fm.createDirectory(at: clipDst, withIntermediateDirectories: false)
+        try? fm.createDirectory(at: clipSrc.appendingPathComponent("子目录"), withIntermediateDirectories: false)
+        fm.createFile(atPath: clipSrc.appendingPathComponent("甲.txt").path, contents: Data("A".utf8))
+        fm.createFile(atPath: clipSrc.appendingPathComponent("丙.txt").path, contents: Data("C".utf8))
+        fm.createFile(atPath: clipSrc.appendingPathComponent("子目录/乙.txt").path, contents: Data("B".utf8))
+
+        func text(_ url: URL) -> String {
+            (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        }
+
+        model.navigate(to: clipSrc)
+        model.reload()
+        check("同卷判定", TransferService.sameVolume(clipSrc, clipDst))
+
+        // 复制 + 同目录粘贴 → 生成「副本」
+        if let jia = model.items.first(where: { $0.name == "甲.txt" }) {
+            model.focus(url: jia.url)
+            model.copySelection()
+            check("复制后可以粘贴", model.canPaste && model.clipboard?.mode == .copy)
+            model.paste()
+            let duplicated = clipSrc.appendingPathComponent("甲 副本.txt")
+            check("同目录粘贴生成「副本」", fm.fileExists(atPath: duplicated.path))
+            check("副本内容一致", text(duplicated) == "A", "实际 \(text(duplicated))")
+            check("复制后剪贴板仍保留", model.clipboard?.mode == .copy)
+            check("粘贴后选中新项目",
+                  model.selection.contains {
+                      $0.standardizedFileURL.path == duplicated.standardizedFileURL.path
+                  },
+                  "选中 \(model.selection.map(\.lastPathComponent))")
+
+            model.paste()
+            let second = clipSrc.appendingPathComponent("甲 副本 2.txt")
+            check("再次粘贴编号递增", fm.fileExists(atPath: second.path))
+        } else {
+            check("同目录粘贴生成「副本」", false, "找不到甲.txt")
+        }
+
+        // 复制目录（连内容）
+        if let dir = model.items.first(where: { $0.name == "子目录" }) {
+            model.focus(url: dir.url)
+            model.copySelection()
+            model.paste()
+            let copiedDir = clipSrc.appendingPathComponent("子目录 副本")
+            check("复制文件夹", fm.fileExists(atPath: copiedDir.path, isDirectory: nil))
+            check("文件夹内容一并复制",
+                  text(copiedDir.appendingPathComponent("乙.txt")) == "B")
+        } else {
+            check("复制文件夹", false, "找不到子目录")
+        }
+
+        // 多选复制
+        if let jia = model.items.first(where: { $0.name == "甲.txt" }),
+           let bing = model.items.first(where: { $0.name == "丙.txt" }) {
+            model.handleClick(on: jia, modifiers: [])
+            model.handleClick(on: bing, modifiers: [.command])
+            check("多选两项", model.selection.count == 2, "实际 \(model.selection.count)")
+            model.copySelection()
+            model.paste()
+            check("多选粘贴各自生成副本",
+                  fm.fileExists(atPath: clipSrc.appendingPathComponent("甲 副本 3.txt").path)
+                    && fm.fileExists(atPath: clipSrc.appendingPathComponent("丙 副本.txt").path))
+        }
+
+        // 剪切 + 换目录粘贴 → 真正移动
+        let moving = clipSrc.appendingPathComponent("待移动.txt")
+        fm.createFile(atPath: moving.path, contents: Data("M".utf8))
+        model.reload()
+        if let item = model.items.first(where: { $0.name == "待移动.txt" }) {
+            model.focus(url: item.url)
+            model.cutSelection()
+            check("剪切状态可识别", model.cutURLs.contains(item.url))
+            model.navigate(to: clipDst)
+            model.paste()
+            check("剪切后源文件消失", !fm.fileExists(atPath: moving.path))
+            check("粘贴后到达目标目录",
+                  fm.fileExists(atPath: clipDst.appendingPathComponent("待移动.txt").path))
+            check("剪切粘贴后清空剪贴板", model.clipboard == nil)
+        } else {
+            check("剪切后源文件消失", false, "找不到待移动.txt")
+        }
+
+        // 剪切遇到同名：整批拒绝，两边都不动
+        let clashSrc = clipSrc.appendingPathComponent("冲突.txt")
+        let clashDst = clipDst.appendingPathComponent("冲突.txt")
+        fm.createFile(atPath: clashSrc.path, contents: Data("src".utf8))
+        fm.createFile(atPath: clashDst.path, contents: Data("dst".utf8))
+        model.navigate(to: clipSrc)
+        if let item = model.items.first(where: { $0.name == "冲突.txt" }) {
+            model.focus(url: item.url)
+            model.cutSelection()
+            model.navigate(to: clipDst)
+            model.paste()
+            check("同名剪切被拒绝", model.errorMessage != nil)
+            check("冲突时目标文件未被覆盖", text(clashDst) == "dst", "实际 \(text(clashDst))")
+            check("冲突时源文件仍在", fm.fileExists(atPath: clashSrc.path))
+            model.dismissError()
+        } else {
+            check("同名剪切被拒绝", false, "找不到冲突.txt")
+        }
+
+        // 原地剪切粘贴：不产生副本
+        model.navigate(to: clipSrc)
+        model.reload()
+        let beforeCount = model.items.count
+        if let item = model.items.first(where: { $0.name == "丙.txt" }) {
+            model.focus(url: item.url)
+            model.cutSelection()
+            model.paste()
+            check("原地剪切粘贴不复制", model.items.count == beforeCount,
+                  "\(beforeCount) → \(model.items.count)")
+            check("原地剪切粘贴给出提示", model.flash != nil)
+        }
+
+        // 不能粘贴到自己的子目录
+        let selfTarget = clipSrc.appendingPathComponent("子目录")
+        if let dirItem = model.items.first(where: { $0.name == "子目录" }) {
+            model.focus(url: dirItem.url)
+            model.copySelection()
+            model.paste(into: selfTarget)
+            check("禁止把文件夹粘贴进自己", model.errorMessage != nil)
+            check("禁止粘贴时不产生内容",
+                  !fm.fileExists(atPath: selfTarget.appendingPathComponent("子目录 副本").path))
+            model.dismissError()
+        } else {
+            check("禁止把文件夹粘贴进自己", false, "找不到子目录")
+        }
+
+        // 粘贴目标不是文件夹
+        model.paste(into: clipSrc.appendingPathComponent("甲.txt"))
+        check("目标是文件时拒绝粘贴", model.errorMessage != nil)
+        model.dismissError()
 
         let before = model.currentURL
         model.navigate(to: root.appendingPathComponent("no-such-dir"))

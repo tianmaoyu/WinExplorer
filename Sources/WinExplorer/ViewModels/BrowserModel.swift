@@ -36,6 +36,17 @@ final class BrowserModel: ObservableObject {
     /// 等待用户确认的"彻底删除"目标
     @Published private(set) var pendingPermanentDelete: [FileItem]?
 
+    /// 应用内文件剪贴板（复制 / 剪切）
+    @Published private(set) var clipboard: FileClipboard?
+    /// 正在进行的复制 / 跨卷移动（nil 表示空闲）
+    @Published private(set) var transfer: TransferProgress?
+    private var transferCancellation: TransferCancellation?
+
+    /// 自检时关掉，避免动到用户的系统剪贴板
+    static var syncsSystemPasteboard = true
+    /// 自检时同步执行复制/移动，便于断言（生产路径始终异步）
+    static var runsTransfersSynchronously = false
+
     @Published var sortColumn: SortColumn = .name {
         didSet { applySortAndFilter() }
     }
@@ -51,6 +62,8 @@ final class BrowserModel: ObservableObject {
 
     private var allItems: [FileItem] = []
     private var flashWorkItem: DispatchWorkItem?
+    private var cachedPasteboardChangeCount = -1
+    private var cachedPasteboardURLs: [URL] = []
 
     /// 根卷的名字，比如 "Macintosh HD"
     static let volumeName: String = {
@@ -75,6 +88,24 @@ final class BrowserModel: ObservableObject {
     var canGoForward: Bool { !forwardStack.isEmpty }
     var canGoUp: Bool { currentURL.path != "/" }
     var hasSelection: Bool { !selection.isEmpty }
+
+    /// 剪切中的项，行里会画成半透明（Windows 的"待移动"观感）
+    var cutURLs: Set<URL> { clipboard?.cutURLs ?? [] }
+
+    /// 有剪贴板内容或系统剪贴板里有文件，才能粘贴
+    var canPaste: Bool {
+        if clipboard != nil { return true }
+        return !systemPasteboardFileURLs().isEmpty
+    }
+
+    /// 有复制/移动任务在跑
+    var isTransferring: Bool { transfer != nil }
+
+    /// 焦点在文本框里（正在行内重命名）。
+    /// 此时 ⌘C/⌘X/⌘V/⌘A 必须作用于文字，不能拿来操作文件。
+    var textEditor: NSTextView? {
+        NSApp.keyWindow?.firstResponder as? NSTextView
+    }
 
     /// 窗口标题：当前文件夹名（根目录显示卷名）
     var titleText: String {
@@ -316,6 +347,259 @@ final class BrowserModel: ObservableObject {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(paths.joined(separator: "\n"), forType: .string)
         showFlash(paths.count == 1 ? "已复制路径" : "已复制 \(paths.count) 条路径")
+    }
+
+    func copyCurrentDirectoryPath() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(currentURL.path, forType: .string)
+        showFlash("已复制当前文件夹路径")
+    }
+
+    func revealCurrentDirectory() {
+        NSWorkspace.shared.activateFileViewerSelecting([currentURL])
+    }
+
+    // MARK: - 剪贴板
+
+    /// 复制：内容同时写进系统剪贴板，所以可以直接粘到 Finder 或其它 App
+    func copySelection() {
+        let targets = selectedItems.map(\.url)
+        guard !targets.isEmpty else {
+            showFlash("请先选中要复制的内容")
+            return
+        }
+        clipboard = FileClipboard(urls: targets, mode: .copy, sourceDirectory: currentURL)
+        writeSystemPasteboard(targets)
+        showFlash(targets.count == 1
+                  ? "已复制「\(targets[0].lastPathComponent)」，⌘V 粘贴"
+                  : "已复制 \(targets.count) 项，⌘V 粘贴")
+    }
+
+    /// 剪切：只做标记，真正移动发生在粘贴时（和 Windows 一致，可以反悔）
+    func cutSelection() {
+        let targets = selectedItems.map(\.url)
+        guard !targets.isEmpty else {
+            showFlash("请先选中要剪切的内容")
+            return
+        }
+        clipboard = FileClipboard(urls: targets, mode: .cut, sourceDirectory: currentURL)
+        writeSystemPasteboard(targets)
+        showFlash(targets.count == 1
+                  ? "已剪切「\(targets[0].lastPathComponent)」，⌘V 粘贴"
+                  : "已剪切 \(targets.count) 项，⌘V 粘贴")
+    }
+
+    func paste(into destination: URL? = nil) {
+        guard transfer == nil else {
+            showFlash("上一项操作还没结束")
+            return
+        }
+
+        let targetDir = (destination ?? currentURL).standardizedFileURL
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: targetDir.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            errorMessage = "「\(targetDir.lastPathComponent)」不是文件夹，无法粘贴到里面"
+            return
+        }
+
+        let mode: ClipboardMode
+        let rawSources: [URL]
+        if let clipboard {
+            mode = clipboard.mode
+            rawSources = clipboard.urls
+        } else {
+            // 应用内剪贴板为空时，尝试用系统剪贴板里的文件（比如刚从 Finder 复制的）
+            mode = .copy
+            rawSources = systemPasteboardFileURLs()
+        }
+
+        let fm = FileManager.default
+        let sources = rawSources
+            .map { $0.standardizedFileURL }
+            .filter { fm.fileExists(atPath: $0.path) }
+        guard !sources.isEmpty else {
+            showFlash(clipboard == nil ? "没有可粘贴的内容" : "剪贴板里的内容已经不在了")
+            return
+        }
+
+        // 防呆：不能把文件夹粘进它自己或它的子目录
+        let targetPath = targetDir.path
+        for source in sources {
+            if targetPath == source.path || targetPath.hasPrefix(source.path + "/") {
+                errorMessage = "不能把「\(source.lastPathComponent)」粘贴到它自己里面"
+                return
+            }
+        }
+
+        var requests: [TransferRequest] = []
+        var skipped: [String] = []
+        var conflicts: [String] = []
+
+        for source in sources {
+            let sameDirectory = source.deletingLastPathComponent().standardizedFileURL.path == targetPath
+            if sameDirectory, mode == .cut {
+                // 原地剪切粘贴 = 什么都不用做
+                skipped.append(source.lastPathComponent)
+                continue
+            }
+
+            let direct = targetDir.appendingPathComponent(source.lastPathComponent)
+            switch mode {
+            case .copy:
+                requests.append(TransferRequest(
+                    source: source,
+                    destination: TransferService.uniqueDestination(for: source, in: targetDir),
+                    mode: .copy
+                ))
+            case .cut:
+                if fm.fileExists(atPath: direct.path) {
+                    conflicts.append(source.lastPathComponent)
+                } else {
+                    requests.append(TransferRequest(source: source, destination: direct, mode: .move))
+                }
+            }
+        }
+
+        // 移动时目标已有同名项：整批拒绝，绝不覆盖
+        if !conflicts.isEmpty {
+            errorMessage = "「\(targetDir.lastPathComponent)」里已存在同名项目："
+                + conflicts.prefix(3).joined(separator: "、")
+                + (conflicts.count > 3 ? " 等" : "")
+                + "，未执行粘贴"
+            return
+        }
+
+        guard !requests.isEmpty else {
+            if !skipped.isEmpty {
+                showFlash("「\(skipped[0])」已经在当前文件夹里")
+            }
+            return
+        }
+
+        let canMoveInstantly = requests.allSatisfy {
+            $0.mode == .move && TransferService.sameVolume($0.source, $0.destination)
+        }
+
+        if canMoveInstantly {
+            var failures: [String] = []
+            for request in requests {
+                do {
+                    try fm.moveItem(at: request.source, to: request.destination)
+                } catch {
+                    failures.append("\(request.source.lastPathComponent)：\(error.localizedDescription)")
+                }
+            }
+            if mode == .cut { clipboard = nil }
+            reload()
+            select(urls: requests.map(\.destination))
+            if failures.isEmpty {
+                showFlash("已移动 \(requests.count) 项到「\(targetDir.lastPathComponent)」")
+            } else {
+                errorMessage = "部分项目移动失败：\n" + failures.joined(separator: "\n")
+            }
+            return
+        }
+
+        // 复制或跨卷移动：后台跑，带进度与取消
+        let cancellation = TransferCancellation()
+        transferCancellation = cancellation
+        let title = mode == .copy ? "正在复制" : "正在移动"
+        let total = requests.reduce(0) { $0 + TransferService.countFiles($1.source) }
+        transfer = TransferProgress(title: title, completed: 0, total: max(total, 1), currentName: "")
+
+        let isCut = mode == .cut
+        let targetName = targetDir.lastPathComponent
+
+        func apply(_ result: TransferService.Result) {
+            transferCancellation = nil
+            transfer = nil
+            if isCut, !result.cancelled { clipboard = nil }
+
+            reload()
+            select(urls: result.moved + result.copied)
+
+            if !result.failures.isEmpty {
+                errorMessage = "部分项目处理失败：\n" + result.failures.joined(separator: "\n")
+            } else if result.cancelled {
+                let done = result.moved.count + result.copied.count
+                showFlash("已取消，其中 \(done) 项已完成")
+            } else {
+                let done = result.moved.count + result.copied.count
+                showFlash("已\(isCut ? "移动" : "复制") \(done) 项到「\(targetName)」")
+            }
+        }
+
+        // 自检模式同步执行，方便断言（生产路径始终走后台队列）
+        if Self.runsTransfersSynchronously {
+            let result = TransferService.perform(
+                requests: requests,
+                title: title,
+                progress: { _ in },
+                isCancelled: { false }
+            )
+            apply(result)
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = TransferService.perform(
+                requests: requests,
+                title: title,
+                // perform 已经把进度切到主线程了，这里不能再包一层 async，
+                // 否则最后一条进度可能晚于 apply() 到达，把已清空的卡片又画出来
+                progress: { snapshot in
+                    self?.transfer = snapshot
+                },
+                isCancelled: { cancellation.isCancelled }
+            )
+
+            DispatchQueue.main.async {
+                apply(result)
+            }
+        }
+    }
+
+    func cancelTransfer() {
+        guard transferCancellation != nil else { return }
+        transferCancellation?.cancel()
+        showFlash("正在取消…")
+    }
+
+    /// 选中一批 URL（粘贴完成后高亮新生成的项目）
+    func select(urls: [URL]) {
+        let paths = Set(urls.map { $0.standardizedFileURL.path })
+        guard !paths.isEmpty else { return }
+        let matched = items.filter { paths.contains($0.url.standardizedFileURL.path) }
+        guard !matched.isEmpty else { return }
+        selection = Set(matched.map(\.url))
+        focusedURL = matched.first?.url
+        anchorURL = matched.first?.url
+        if let first = matched.first { scrollRequest = ScrollRequest(first.url) }
+    }
+
+    // MARK: - 系统剪贴板桥接
+
+    private func writeSystemPasteboard(_ urls: [URL]) {
+        guard Self.syncsSystemPasteboard else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects(urls as [NSURL])
+    }
+
+    /// 读系统剪贴板里的文件 URL（按 changeCount 缓存，避免每次渲染都解归档）
+    func systemPasteboardFileURLs() -> [URL] {
+        guard Self.syncsSystemPasteboard else { return [] }
+        let pasteboard = NSPasteboard.general
+        if pasteboard.changeCount != cachedPasteboardChangeCount {
+            cachedPasteboardChangeCount = pasteboard.changeCount
+            let objects = pasteboard.readObjects(
+                forClasses: [NSURL.self],
+                options: [.urlReadingFileURLsOnly: true]
+            ) as? [URL] ?? []
+            cachedPasteboardURLs = objects.filter(\.isFileURL)
+        }
+        return cachedPasteboardURLs
     }
 
     // MARK: - 重命名

@@ -11,24 +11,54 @@ struct ExplorerCommands: Commands {
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
 
-            Button("刷新") {
-                model.reload()
-            }
-            .keyboardShortcut("r", modifiers: .command)
-
             Button("打开") {
                 model.openSelection()
             }
             .keyboardShortcut("o", modifiers: .command)
             .disabled(!model.hasSelection)
 
-            Divider()
-
             Button("重命名…") {
                 model.beginRename()
             }
             .keyboardShortcut(KeyEquivalent("\u{F705}"), modifiers: [])
             .disabled(model.selection.count != 1)
+
+            Button("刷新") {
+                model.reload()
+            }
+            .keyboardShortcut("r", modifiers: .command)
+        }
+
+        // 用文件语义的"编辑"菜单替换系统剪贴板菜单：
+        // 正在重命名时，动作交回给文本框，所以不会打断打字时的复制粘贴。
+        CommandGroup(replacing: .pasteboard) {
+            Button("剪切") {
+                if let editor = model.textEditor { editor.cut(nil) } else { model.cutSelection() }
+            }
+            .keyboardShortcut("x", modifiers: .command)
+            .disabled(model.textEditor == nil && !model.hasSelection)
+
+            Button("复制") {
+                if let editor = model.textEditor { editor.copy(nil) } else { model.copySelection() }
+            }
+            .keyboardShortcut("c", modifiers: .command)
+            .disabled(model.textEditor == nil && !model.hasSelection)
+
+            Button("粘贴") {
+                if let editor = model.textEditor { editor.paste(nil) } else { model.paste() }
+            }
+            .keyboardShortcut("v", modifiers: .command)
+            .disabled(model.textEditor == nil && (!model.canPaste || model.isTransferring))
+
+            Divider()
+
+            Button("复制路径") {
+                model.copySelectedPaths()
+            }
+            .keyboardShortcut("c", modifiers: [.command, .option])
+            .disabled(!model.hasSelection)
+
+            Divider()
 
             Button("移到废纸篓") {
                 model.moveSelectionToTrash()
@@ -41,28 +71,14 @@ struct ExplorerCommands: Commands {
             }
             .keyboardShortcut(KeyEquivalent("\u{8}"), modifiers: [.command, .shift])
             .disabled(!model.hasSelection)
-        }
-
-        CommandGroup(after: .pasteboard) {
-            Button("全选") {
-                model.selectAll()
-            }
-            .keyboardShortcut("a", modifiers: .command)
-            .disabled(model.items.isEmpty)
-
-            Button("取消选择") {
-                model.clearSelection()
-            }
-            .keyboardShortcut(.escape, modifiers: [])
-            .disabled(!model.hasSelection)
 
             Divider()
 
-            Button("复制路径") {
-                model.copySelectedPaths()
+            Button("全选") {
+                if let editor = model.textEditor { editor.selectAll(nil) } else { model.selectAll() }
             }
-            .keyboardShortcut("c", modifiers: [.command, .option])
-            .disabled(!model.hasSelection)
+            .keyboardShortcut("a", modifiers: .command)
+            .disabled(model.textEditor == nil && model.items.isEmpty)
         }
 
         CommandMenu("前往") {

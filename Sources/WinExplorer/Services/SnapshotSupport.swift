@@ -5,9 +5,15 @@ import AppKit
 /// - `WINEXPLORER_KEYS=down,down,return` 截图前先向窗口发送按键（走真实响应链，验证键盘处理）
 /// 用于在无「屏幕录制 / 辅助功能」权限的环境下验证 UI 与键盘。
 enum SnapshotSupport {
-    static func scheduleIfNeeded() {
+    private static var hasScheduled = false
+
+    /// 由根视图在出现时调用，把模型交给截图脚本使用（支持 nav:/路径 这类开发指令）
+    static func scheduleIfNeeded(model: BrowserModel) {
         let env = ProcessInfo.processInfo.environment
-        guard let path = env["WINEXPLORER_SNAPSHOT"] else { return }
+        guard env["WINEXPLORER_SNAPSHOT"] != nil else { return }
+        guard !hasScheduled else { return }
+        hasScheduled = true
+        let path = env["WINEXPLORER_SNAPSHOT"]!
 
         let keys = (env["WINEXPLORER_KEYS"] ?? "")
             .split(separator: ",")
@@ -33,10 +39,18 @@ enum SnapshotSupport {
             // 逐个按键发送并留出间隔：像 F2 打开输入框这类操作需要等 UI 更新、焦点转移完成
             for (index, key) in keys.enumerated() {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.12 * Double(index)) {
+                    if key.hasPrefix("nav:") {
+                        let target = String(key.dropFirst("nav:".count))
+                        model.navigate(to: URL(fileURLWithPath: target))
+                        return
+                    }
                     postKey(key, to: window)
                 }
             }
-            let totalDelay = 0.12 * Double(keys.count) + 0.5
+            // WINEXPLORER_SNAPSHOT_DELAY 可以拉长截图前的等待时间，用来抓复制进度这类瞬时状态
+            let overrideDelay = ProcessInfo.processInfo.environment["WINEXPLORER_SNAPSHOT_DELAY"]
+                .flatMap(Double.init)
+            let totalDelay = overrideDelay ?? (0.12 * Double(keys.count) + 0.5)
             DispatchQueue.main.asyncAfter(deadline: .now() + totalDelay) {
                 capture(window: window, to: path)
             }

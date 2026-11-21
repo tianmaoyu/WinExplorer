@@ -47,6 +47,9 @@ struct FileListView: View {
                             .onTapGesture {
                                 model.clearSelection()
                             }
+                            .contextMenu {
+                                emptyAreaMenu
+                            }
 
                         LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                             Section {
@@ -129,6 +132,7 @@ struct FileListView: View {
             item: item,
             isSelected: model.selection.contains(item.url) && !renaming,
             isRenaming: renaming,
+            isCut: model.cutURLs.contains(item.url),
             onCommitRename: { newName in
                 let ok = model.commitRename(newName)
                 if ok {
@@ -179,8 +183,19 @@ struct FileListView: View {
             model.revealInFinder(item)
         }
         Divider()
-        Button("重命名…") {
-            model.beginRename(item: item)
+        Button("剪切") {
+            if !inSelection { model.selectOnly(item) }
+            model.cutSelection()
+        }
+        Button("复制") {
+            if !inSelection { model.selectOnly(item) }
+            model.copySelection()
+        }
+        if item.isFolderLike {
+            Button("粘贴到此处") {
+                model.paste(into: item.url)
+            }
+            .disabled(!model.canPaste || model.isTransferring)
         }
         if inSelection && model.selection.count > 1 {
             Button("复制 \(model.selection.count) 项路径") {
@@ -190,6 +205,10 @@ struct FileListView: View {
             Button("复制路径") {
                 model.copyPath(item)
             }
+        }
+        Divider()
+        Button("重命名…") {
+            model.beginRename(item: item)
         }
         Divider()
         Button("移到废纸篓") {
@@ -204,6 +223,35 @@ struct FileListView: View {
         Button("刷新") {
             model.reload()
         }
+    }
+
+    /// 空白区域右键菜单（Windows 在文件夹空白处右键的效果）
+    @ViewBuilder
+    private var emptyAreaMenu: some View {
+        Button("新建文件夹") {
+            model.createFolder()
+        }
+        Button("粘贴") {
+            model.paste()
+        }
+        .disabled(!model.canPaste || model.isTransferring)
+        Divider()
+        Button("全选") {
+            model.selectAll()
+        }
+        .disabled(model.items.isEmpty)
+        Button("刷新") {
+            model.reload()
+        }
+        Divider()
+        Button("在 Finder 中显示") {
+            model.revealCurrentDirectory()
+        }
+        Button("复制当前文件夹路径") {
+            model.copyCurrentDirectoryPath()
+        }
+        Divider()
+        Toggle("显示隐藏文件", isOn: $model.showHidden)
     }
 
     private var emptyState: some View {
@@ -226,6 +274,7 @@ struct FileRow: View {
     let item: FileItem
     let isSelected: Bool
     var isRenaming: Bool = false
+    var isCut: Bool = false
     var onCommitRename: (String) -> Bool = { _ in false }
     var onCancelRename: () -> Void = {}
 
@@ -285,6 +334,8 @@ struct FileRow: View {
                 .fill(backgroundColor)
                 .padding(.horizontal, 4)
         }
+        // 剪切中的项整体变淡，和 Windows 的"待移动"观感一致
+        .opacity(isCut ? 0.5 : 1)
         .onHover { hovered = $0 }
     }
 

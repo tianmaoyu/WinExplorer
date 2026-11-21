@@ -12,6 +12,7 @@ struct BrowserView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .toolbar { toolbarContent }
+        .onAppear { SnapshotSupport.scheduleIfNeeded(model: model) }
         .overlay {
             if let targets = model.pendingPermanentDelete {
                 DeleteConfirmView(
@@ -26,6 +27,13 @@ struct BrowserView: View {
             KeyCaptureView(onKey: handleKey)
                 .frame(width: 0, height: 0)
                 .allowsHitTesting(false)
+        }
+        .overlay(alignment: .bottom) {
+            if let progress = model.transfer {
+                TransferProgressView(progress: progress) {
+                    model.cancelTransfer()
+                }
+            }
         }
     }
 
@@ -95,6 +103,25 @@ struct BrowserView: View {
             }
         }
 
+        // C / X / V = 复制、剪切、粘贴。同样兼容 Command 被重映射后的 fn / ⌥ 版本；
+        // ⌥⌘C 是"复制路径"，留给菜单处理。
+        if [7, 8, 9].contains(event.keyCode) {
+            let clipboardFlags: NSEvent.ModifierFlags = [.command, .function, .option]
+            let isCopyPath = event.keyCode == 8
+                && flags.contains(.command)
+                && flags.contains(.option)
+            if !flags.intersection(clipboardFlags).isEmpty,
+               !isCopyPath,
+               !flags.contains(.control) {
+                switch event.keyCode {
+                case 7: model.cutSelection()
+                case 8: model.copySelection()
+                default: model.paste()
+                }
+                return true
+            }
+        }
+
         // Delete（keyCode 51）/ 前向删除（117）：⌘⌫ 进废纸篓，⇧⌘⌫ 彻底删除
         if event.keyCode == 51 || event.keyCode == 117, flags.contains(.command) {
             if flags.contains(.shift) {
@@ -130,6 +157,8 @@ struct BrowserView: View {
         case 53: // Esc
             if model.pendingPermanentDelete != nil {
                 model.cancelPermanentDelete()
+            } else if model.isTransferring {
+                model.cancelTransfer()
             } else {
                 model.clearSelection()
             }
@@ -164,6 +193,14 @@ struct BrowserView: View {
         }
 
         ToolbarItemGroup(placement: .primaryAction) {
+            Button {
+                model.paste()
+            } label: {
+                Label("粘贴", systemImage: "doc.on.clipboard")
+            }
+            .disabled(!model.canPaste || model.isTransferring)
+            .help("粘贴到当前文件夹（⌘V）")
+
             Button(action: model.createFolder) {
                 Label("新建文件夹", systemImage: "folder.badge.plus")
             }
