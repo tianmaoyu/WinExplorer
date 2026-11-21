@@ -105,6 +105,12 @@ enum SelfTest {
         check("再按 ↓ 前进一项", model.focusedURL == model.items[1].url)
         check("键盘移动带滚动请求", model.scrollRequest?.url == model.items[1].url)
 
+        // 滚动请求目标：项滚动带 URL（兼容接口），底部留白滚动不带
+        model.scrollRequest = ScrollRequest(trailingBlank: true)
+        check("底部留白滚动请求", model.scrollRequest?.target == .trailingBlank && model.scrollRequest?.url == nil)
+        model.scrollRequest = ScrollRequest(model.items[0].url)
+        check("项滚动请求兼容接口", model.scrollRequest?.url == model.items[0].url)
+
         model.moveFocus(by: 12)
         check("↓ 越界不飞出列表", model.focusedURL == model.items.last?.url)
 

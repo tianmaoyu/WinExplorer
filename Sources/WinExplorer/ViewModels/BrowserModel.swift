@@ -2,14 +2,31 @@ import AppKit
 import Combine
 import Foundation
 
-/// 键盘导航后需要把某一行滚进视口（用 token 保证同一个 URL 连续触发也能生效）
+/// 键盘导航后需要把某一行滚进视口（用 token 保证同一个 URL/目标 连续触发也能生效）
 struct ScrollRequest: Equatable {
-    let url: URL
+    enum Target: Equatable {
+        case item(URL)
+        /// 列表底部留白（滚到底：scroll:end 钩子与截图验收用）
+        case trailingBlank
+    }
+
+    let target: Target
     let token: UUID
 
     init(_ url: URL) {
-        self.url = url
-        self.token = UUID()
+        target = .item(url)
+        token = UUID()
+    }
+
+    init(trailingBlank: Bool = true) {
+        target = .trailingBlank
+        token = UUID()
+    }
+
+    /// 项滚动请求的 URL（其它目标为 nil），旧调用/断言可继续用
+    var url: URL? {
+        if case .item(let url) = target { return url }
+        return nil
     }
 }
 

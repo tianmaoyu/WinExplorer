@@ -187,6 +187,16 @@ enum SnapshotSupport {
                         FileManager.default.createFile(atPath: url.path, contents: Data("snapshot hook".utf8))
                         return
                     }
+                    if key == "scroll:end" {
+                        // 滚到列表最底部（露出底部留白），截图验收「留空白」用。
+                        // 刚 nav: 完布局还没就绪时首次 scrollTo 会扑空，隔 0.35s 重发一次
+                        // （token 变化保证 onChange 一定会再触发）。
+                        active.scrollRequest = ScrollRequest(trailingBlank: true)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            active.scrollRequest = ScrollRequest(trailingBlank: true)
+                        }
+                        return
+                    }
                     postKey(key, to: window)
                 }
             }

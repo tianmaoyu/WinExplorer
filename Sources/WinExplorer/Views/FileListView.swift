@@ -11,6 +11,12 @@ enum FileListLayout {
     static let dateTrailingPadding: CGFloat = 4
     static let dividerHitWidth: CGFloat = 7
 
+    /// 底部留白：只加在滚动内容的最底部（顶部/中间/左右都不加）。
+    /// 密集列表也能向下滚出一段空白，右键空白的「新建」菜单永远可达（adr/0010）。
+    static let trailingBlankHeight: CGFloat = 240
+    /// 底部留白的滚动定位 id（ScrollRequest .trailingBlank / scroll:end 钩子用）
+    static let trailingBlankID = "winexplorer.trailing-blank"
+
     @ViewBuilder
     static func row<Name: View, Size: View, Date: View, Kind: View>(
         widths: ColumnWidths,
@@ -85,13 +91,22 @@ struct FileListView: View {
                                 return true
                             }
 
-                        switch model.viewMode {
-                        case .details:
-                            detailsContent(width: geometry.size.width)
-                        case .list:
-                            listContent
-                        case .icons:
-                            iconsContent(width: geometry.size.width)
+                        VStack(spacing: 0) {
+                            switch model.viewMode {
+                            case .details:
+                                detailsContent(width: geometry.size.width)
+                            case .list:
+                                listContent
+                            case .icons:
+                                iconsContent(width: geometry.size.width)
+                            }
+                            // 底部留白：仅在滚动内容最底部加这一段空白，滚到底即露出。
+                            // allowsHitTesting(false) 让点击/右键/拖放穿透到底层空白色，
+                            // 与原有空白区行为完全一致（清选择、空白右键菜单、拖入当前目录）。
+                            Color.clear
+                                .frame(height: FileListLayout.trailingBlankHeight)
+                                .allowsHitTesting(false)
+                                .id(FileListLayout.trailingBlankID)
                         }
                     }
                     .frame(minHeight: geometry.size.height, alignment: .top)
@@ -99,7 +114,13 @@ struct FileListView: View {
                 .onChange(of: model.scrollRequest) { _, request in
                     guard let request else { return }
                     withAnimation(.easeOut(duration: 0.12)) {
-                        proxy.scrollTo(request.url, anchor: nil)
+                        switch request.target {
+                        case .item(let url):
+                            proxy.scrollTo(url, anchor: nil)
+                        case .trailingBlank:
+                            // 对齐底部留白的下缘 = 滚到最大滚动位置
+                            proxy.scrollTo(FileListLayout.trailingBlankID, anchor: .bottom)
+                        }
                     }
                 }
                 .overlay {
