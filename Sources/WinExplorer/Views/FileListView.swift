@@ -97,6 +97,74 @@ struct FileListView: View {
     /// 鼠标悬在哪条列分隔线上（悬停时线变强调色，提示「这里可以拖」）
     @State private var hoveredDivider: ResizableColumn?
 
+    /// 调列宽用的光标：中间一条竖线、两侧各一个箭头。
+    ///
+    /// 没有直接用 `NSCursor.columnResize`：它的 `.image` 在 macOS 15 上取到的
+    /// 和 `resizeLeftRight` 是同一张位图（实测像素完全一致），拿不到真实外观，
+    /// 而且 Swift 侧要到 macOS 15 才暴露。自绘更可控 —— 形状、粗细、描边都能定死，
+    /// 也不受系统版本影响。
+    private static let dividerCursor: NSCursor = DividerCursor.make()
+
+    private enum DividerCursor {
+        static let logicalSize = NSSize(width: 32, height: 32)
+
+        static func make() -> NSCursor {
+            let image = NSImage(size: logicalSize)
+            for scale in [1, 2] {
+                let side = Int(logicalSize.width) * scale
+                guard let rep = NSBitmapImageRep(
+                    bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side,
+                    bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                    colorSpaceName: .calibratedRGB, bytesPerRow: 0, bitsPerPixel: 0
+                ) else { continue }
+                rep.size = logicalSize
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+                NSGraphicsContext.current?.imageInterpolation = .high
+                draw()
+                NSGraphicsContext.restoreGraphicsState()
+                image.addRepresentation(rep)
+            }
+            // 热点放在正中心：拖拽时竖线正好压在列边界上
+            return NSCursor(image: image,
+                            hotSpot: NSPoint(x: logicalSize.width / 2, y: logicalSize.height / 2))
+        }
+
+        /// 形状：1.5pt 竖线（高 16）+ 左右各一个 4pt 长的实心箭头。
+        /// 先描 3pt 白边再填黑，深浅背景下都看得清（系统光标也是这个做法）。
+        private static func draw() {
+            let centerY: CGFloat = 16
+            let barHalf: CGFloat = 7          // 竖线半高
+            let barWidth: CGFloat = 1.5
+            let armGap: CGFloat = 3.5         // 竖线到箭头尖端的距离
+            let armLength: CGFloat = 7
+            let headHalf: CGFloat = 4         // 箭头底边半高
+
+            let path = NSBezierPath()
+            path.appendRect(NSRect(x: 16 - barWidth / 2, y: centerY - barHalf,
+                                   width: barWidth, height: barHalf * 2))
+
+            for direction in [CGFloat(-1), 1] {
+                let tip = CGPoint(x: 16 + direction * (armGap + armLength),
+                                  y: centerY)
+                let base = CGPoint(x: 16 + direction * armGap, y: centerY)
+                path.move(to: tip)
+                path.line(to: CGPoint(x: base.x, y: centerY - headHalf))
+                path.line(to: CGPoint(x: base.x, y: centerY + headHalf))
+                path.close()
+            }
+
+            // 白色描边打底，让光标在深色背景（暗色模式、深色行）上也有轮廓
+            NSColor.white.setStroke()
+            path.lineWidth = 3
+            path.lineJoinStyle = .round
+            path.stroke()
+
+            NSColor.black.setFill()
+            path.fill()
+        }
+    }
+
     var body: some View {
         GeometryReader { geometry in
             ScrollViewReader { proxy in
@@ -269,7 +337,8 @@ struct FileListView: View {
             hoveredDivider = inside ? column : (hoveredDivider == column ? nil : hoveredDivider)
             // 用 set 而不是 push/pop：视图被重建时 push 容易和 pop 失配，鼠标指针会卡住
             if inside {
-                NSCursor.resizeLeftRight.set()
+                // columnResize：中间竖线 + 两侧箭头，macOS 给「调列宽」的专用光标
+                Self.dividerCursor.set()
             } else {
                 NSCursor.arrow.set()
             }
@@ -281,6 +350,9 @@ struct FileListView: View {
                             resizingColumn = column
                             resizeStart = model.width(for: column)
                         }
+                        // 拖动时鼠标可能移出细窄的热区，onHover 会把光标换回箭头；
+                        // 这里每帧钉一次，保证整个拖动过程都是列宽光标
+                        Self.dividerCursor.set()
                         let start = resizeStart ?? model.width(for: column)
                         model.resizeColumn(column, to: start - value.translation.width)
                     }

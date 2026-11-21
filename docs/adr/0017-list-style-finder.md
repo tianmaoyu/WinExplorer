@@ -67,3 +67,25 @@
 - 验收图：`docs/screenshot-1.4.10-list-light.png`、
   `docs/screenshot-1.4.10-list-dark.png`、`docs/comparison-1.4.10-list-style.png`。
 - 新增截图钩子 `WINEXPLORER_KEYS=select:<index>`，用于选中第 N 行做视觉验收。
+
+## 修订：列宽拖拽光标（v1.4.12）
+
+用户要求「鼠标在分隔线上时要变成竖线两边有箭头的样式」。原来用的是
+`NSCursor.resizeLeftRight`（只有左右箭头，没有中间竖线）。
+
+先试了系统的 `NSCursor.columnResize`：Swift 侧要求 macOS 15+，而且实测它的
+`.image` 与 `resizeLeftRight` **返回同一张位图**（像素数、包围盒完全一致），
+拿不到真实外观，没法确认最终效果。
+
+于是改为自绘（`FileListView.DividerCursor`）：
+
+- 形状：1.5pt 竖线（高 16）+ 左右各一个实心三角箭头，整体约 19×16pt；
+- 2x / 1x 两份表示，Retina 下清晰；
+- 先描 3pt 白边再填黑，深色背景（暗色模式、深灰行）上也有轮廓；
+- 热点放在正中心，拖动时竖线正好压在列边界上。
+
+另外在拖动的 `onChanged` 里每帧重新 `set()`：热区只有 7pt 宽，拖动时鼠标容易
+移出去，`onHover` 会把光标换回箭头，钉一次可以保证整个过程都是列宽光标。
+
+验收图：`docs/comparison-1.4.12-column-cursor.png`（左：旧光标，右：新光标）。
+
