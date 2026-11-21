@@ -129,6 +129,19 @@ enum SnapshotSupport {
                         active.dropTargetURL = URL(fileURLWithPath: String(key.dropFirst("drop:".count)))
                         return
                     }
+                    if key.hasPrefix("open:") {
+                        // 选中并"打开"某个项目：用于截图验收未授权项的授权浮层
+                        let raw = String(key.dropFirst("open:".count))
+                        let url = raw.hasPrefix("/")
+                            ? URL(fileURLWithPath: raw)
+                            : active.currentURL.appendingPathComponent(raw)
+                        let target = url.standardizedFileURL
+                        if let item = active.items.first(where: { $0.url.standardizedFileURL.path == target.path }) {
+                            active.selectOnly(item)
+                            active.open(item)
+                        }
+                        return
+                    }
                     if key.hasPrefix("preview:") {
                         // 选中某个文件并打开 Quick Look（不依赖列表焦点，便于截图验收）
                         let url = URL(fileURLWithPath: String(key.dropFirst("preview:".count)))

@@ -3,6 +3,11 @@ import SwiftUI
 struct StatusBar: View {
     @ObservedObject var model: BrowserModel
 
+    /// 当前目录里有多少项是"系统不给读"的（只在状态栏提示，不打断任何操作）
+    private var unauthorizedCount: Int {
+        model.items.filter { $0.access.isDenied }.count
+    }
+
     var body: some View {
         HStack(spacing: 6) {
             if let flash = model.flash {
@@ -11,6 +16,15 @@ struct StatusBar: View {
                     .foregroundStyle(Color.accentColor)
             } else {
                 summary
+            }
+
+            if unauthorizedCount > 0 {
+                Text("·")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                Text(L("\(unauthorizedCount) 项未授权", "\(unauthorizedCount) not authorized"))
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.orange)
             }
 
             if let progress = model.folderSizeProgress {

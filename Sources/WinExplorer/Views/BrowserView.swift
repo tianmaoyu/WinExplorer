@@ -82,6 +82,17 @@ struct BrowserView: View {
                 )
             }
         }
+        .overlay {
+            if let request = model.accessRequest {
+                AccessRequestView(
+                    request: request,
+                    onCancel: { model.cancelAccessRequest() },
+                    onAuthorize: { model.authorizeBlockedTarget() },
+                    onReveal: { model.revealBlockedTarget() },
+                    onOpenSettings: { model.openPrivacySettings() }
+                )
+            }
+        }
         .overlay(alignment: .topLeading) {
             // 零尺寸的键盘接收视图，保证方向键/回车不被 SwiftUI 的焦点系统吞掉
             KeyCaptureView(onKey: handleKey)
@@ -182,6 +193,7 @@ struct BrowserView: View {
                 model.cancelPermanentDelete()
                 model.closeInfo()
                 model.closeAbout()
+                model.cancelAccessRequest()
             } else if event.keyCode == 34 {
                 model.closeInfo()
                 model.closeAbout()

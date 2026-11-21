@@ -73,6 +73,9 @@ final class BrowserModel: ObservableObject {
     /// 属性面板的内容（nil 表示关闭）
     @Published private(set) var info: InfoSheetState?
 
+    /// 等待用户授权才能继续的那一项 / 那个目录（nil 表示没有）
+    @Published private(set) var accessRequest: AccessRequest?
+
     /// 关于面板
     @Published var showsAbout = false
 
@@ -369,6 +372,8 @@ final class BrowserModel: ObservableObject {
 
     /// 一行的「大小」列文字：文件直接给大小，文件夹按需异步统计
     func sizeText(for item: FileItem) -> String {
+        // 未授权项读不到内容，别把统计出来的 0 当成"空文件夹"
+        guard item.isAccessible else { return "—" }
         guard item.isDirectory else { return item.sizeText }
         guard showsFolderSizes else { return "—" }
         guard let size = folderSizes[item.url.standardizedFileURL.path] else { return "…" }
@@ -379,7 +384,7 @@ final class BrowserModel: ObservableObject {
     /// 文件夹大小的统计进度（0…1，没有在算时返回 nil），状态栏用
     var folderSizeProgress: (done: Int, total: Int)? {
         guard showsFolderSizes else { return nil }
-        let folders = items.filter(\.isDirectory)
+        let folders = items.filter { $0.isDirectory && $0.isAccessible }
         guard !folders.isEmpty else { return nil }
         let done = folders.filter { folderSizes[$0.url.standardizedFileURL.path] != nil }.count
         guard done < folders.count else { return nil }
@@ -567,6 +572,7 @@ final class BrowserModel: ObservableObject {
             pendingPermanentDelete = nil
             batchRename = nil
             dropTargetURL = nil
+            accessRequest = nil
             errorMessage = nil
             isEditingPath = false
             pathError = nil
@@ -576,7 +582,14 @@ final class BrowserModel: ObservableObject {
             refreshFolderSizes()
             watchDirectory(standardized)
         } catch {
-            errorMessage = L("无法打开「\(url.lastPathComponent)」：\(error.localizedDescription)", "Can’t open “\(url.lastPathComponent)”: \(error.localizedDescription)")
+            // 权限问题不弹系统横幅式的错误条，改成窗口内的授权浮层：
+            // 用户需要的是「怎么授权」，不是一行 error.localizedDescription
+            if PermissionService.isPermissionDenied(error) {
+                errorMessage = nil
+                requestAccess(forDirectory: url, reason: error.localizedDescription)
+            } else {
+                errorMessage = L("无法打开「\(url.lastPathComponent)」：\(error.localizedDescription)", "Can’t open “\(url.lastPathComponent)”: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -614,7 +627,7 @@ final class BrowserModel: ObservableObject {
             return
         }
 
-        let folders = items.filter(\.isDirectory)
+        let folders = items.filter { $0.isDirectory && $0.isAccessible }
         guard !folders.isEmpty else {
             folderSizes = [:]
             return
@@ -656,7 +669,8 @@ final class BrowserModel: ObservableObject {
 
     private static func signature(of items: [FileItem]) -> [String] {
         items.map {
-            "\($0.url.path)|\($0.size ?? -1)|\($0.modified?.timeIntervalSince1970 ?? 0)|\($0.isDirectory)"
+            // 带上 access：权限被改掉时也要触发列表刷新（否则会一直显示旧的锁状态）
+            "\($0.url.path)|\($0.size ?? -1)|\($0.modified?.timeIntervalSince1970 ?? 0)|\($0.isDirectory)|\($0.access.rawValue)"
         }
         .sorted()
     }
@@ -672,6 +686,7 @@ final class BrowserModel: ObservableObject {
               pendingPermanentDelete == nil,
               batchRename == nil,
               info == nil,
+              accessRequest == nil,
               !isEditingPath,
               transfer == nil,
               archiveBusy == nil else { return }
@@ -689,7 +704,18 @@ final class BrowserModel: ObservableObject {
             applySortAndFilter()
             refreshFolderSizes()
         } catch {
-            if errorMessage == nil {
+            if PermissionService.isPermissionDenied(error) {
+                // 当前目录被收走了：已加载的行一律按未授权显示，再给一次授权入口
+                allItems = allItems.map {
+                    var copy = $0
+                    copy.access = .denied
+                    return copy
+                }
+                applySortAndFilter()
+                if accessRequest == nil {
+                    requestAccess(forDirectory: currentURL, reason: error.localizedDescription)
+                }
+            } else if errorMessage == nil {
                 errorMessage = L("「\(currentURL.lastPathComponent)」已不可访问：\(error.localizedDescription)", "“\(currentURL.lastPathComponent)” is no longer accessible: \(error.localizedDescription)")
             }
             directoryWatcher.stop()
@@ -849,9 +875,94 @@ final class BrowserModel: ObservableObject {
         min(max(value, range.lowerBound), range.upperBound)
     }
 
+    // MARK: - 访问授权
+
+    /// 有未授权项就弹授权浮层并返回 true —— 调用方直接 return，不做半截操作。
+    /// 这是唯一的拦截点：列目录、画行、算大小都不会走到这里。
+    private func blockedByUnauthorized(_ items: [FileItem]) -> Bool {
+        let denied = items.filter { $0.access.isDenied }
+        guard !denied.isEmpty else { return false }
+        requestAccess(forItems: denied)
+        return true
+    }
+
+    /// 用户主动打开 / 操作某个未授权项时，只针对该项提示
+    func requestAccess(forItems items: [FileItem]) {
+        guard let first = items.first else { return }
+        accessRequest = AccessRequest(
+            target: first.url,
+            items: items,
+            reason: nil,
+            needsSystemSettings: PermissionService.needsSystemSettings(first.url)
+        )
+    }
+
+    /// 进入一个打不开的目录时提示（items 为空表示"整目录被拒"）
+    func requestAccess(forDirectory url: URL, reason: String?) {
+        accessRequest = AccessRequest(
+            target: url,
+            items: [],
+            reason: reason,
+            needsSystemSettings: PermissionService.needsSystemSettings(url)
+        )
+    }
+
+    func cancelAccessRequest() {
+        accessRequest = nil
+    }
+
+    /// 「选择此项目以授权」：拉起一次系统面板，回来只重新探测，不做别的事
+    func authorizeBlockedTarget() {
+        guard let request = accessRequest else { return }
+        // 先收起浮层，否则面板会被挡住
+        accessRequest = nil
+
+        guard let picked = PermissionService.pickInPanel(target: request.target) else { return }
+
+        guard PermissionService.isReadable(picked) else {
+            // 重新选过还是不给读：说明不是"没授权"而是文件本身的权限位 / 只读卷
+            accessRequest = AccessRequest(
+                target: request.target,
+                items: request.items,
+                reason: L(
+                    "系统仍然拒绝读取「\(picked.lastPathComponent)」。这通常是文件自身的权限位或所在卷只读，需要在 Finder 的「显示简介 → 共享与权限」里改。",
+                    "macOS still refuses to read “\(picked.lastPathComponent)”. This is usually the file’s own permission bits or a read-only volume — change it in Finder’s Get Info → Sharing & Permissions."
+                ),
+                needsSystemSettings: request.needsSystemSettings
+            )
+            return
+        }
+
+        if request.items.isEmpty {
+            // 原本是"进不去这个目录"，现在能进了就直接进去
+            load(directory: request.target.standardizedFileURL, recordHistory: true)
+        } else {
+            // 单个项目：刷新一遍让锁与淡化消失，不替用户执行原本的操作
+            refreshFromDisk()
+        }
+        showFlash(L("已获得「\(picked.lastPathComponent)」的访问权限", "Access granted for “\(picked.lastPathComponent)”"))
+    }
+
+    /// 面板里的「打开系统设置」
+    func openPrivacySettings() {
+        if !PermissionService.openPrivacySettings() {
+            showFlash(L("没能打开系统设置，可在「隐私与安全性 → 文件与文件夹」里手动添加", "Couldn’t open System Settings — add it manually under Privacy & Security → Files and Folders"))
+        }
+    }
+
+    /// 面板里的「在 Finder 中显示」（改权限位要去 Finder 的显示简介）
+    func revealBlockedTarget() {
+        guard let target = accessRequest?.target else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([target])
+    }
+
     // MARK: - 打开 / 操作
 
     func open(_ item: FileItem) {
+        guard !item.access.isDenied else {
+            requestAccess(forItems: [item])
+            return
+        }
         if item.isFolderLike {
             load(directory: item.url, recordHistory: true)
         } else {
@@ -862,6 +973,7 @@ final class BrowserModel: ObservableObject {
     func openSelection() {
         let targets = selectedItems
         guard !targets.isEmpty else { return }
+        if blockedByUnauthorized(targets) { return }
 
         if targets.count == 1 {
             open(targets[0])
@@ -917,6 +1029,8 @@ final class BrowserModel: ObservableObject {
             showFlash(L("请先选中要预览的项目", "Select what you want to preview"))
             return
         }
+        // 预览要真读文件，未授权项先提示授权，避免系统预览面板弹出一片空白
+        if blockedByUnauthorized(targets) { return }
         QuickLookController.shared.onFocus = { [weak self] url in
             self?.focus(url: url)
         }
@@ -1036,6 +1150,7 @@ final class BrowserModel: ObservableObject {
     /// 属性面板 / 删除确认 / 批量重命名 / 关于 打开时，方向键/快捷键不应继续操作后台列表
     var hasModalOverlay: Bool {
         info != nil || pendingPermanentDelete != nil || batchRename != nil || showsAbout
+            || accessRequest != nil
     }
 
     // MARK: - 剪贴板
@@ -1047,6 +1162,7 @@ final class BrowserModel: ObservableObject {
             showFlash(L("请先选中要复制的内容", "Select what you want to copy"))
             return
         }
+        if blockedByUnauthorized(selectedItems) { return }
         clipboard = FileClipboard(urls: targets, mode: .copy, sourceDirectory: currentURL)
         writeSystemPasteboard(targets)
         showFlash(targets.count == 1
@@ -1061,6 +1177,7 @@ final class BrowserModel: ObservableObject {
             showFlash(L("请先选中要剪切的内容", "Select what you want to cut"))
             return
         }
+        if blockedByUnauthorized(selectedItems) { return }
         clipboard = FileClipboard(urls: targets, mode: .cut, sourceDirectory: currentURL)
         writeSystemPasteboard(targets)
         showFlash(targets.count == 1
@@ -1580,6 +1697,7 @@ final class BrowserModel: ObservableObject {
             showFlash(L("请先选中要压缩的项目", "Select what you want to compress"))
             return
         }
+        if blockedByUnauthorized(selectedItems) { return }
         let destination = ArchiveService.compressDestination(for: targets, in: currentURL)
         runArchive(
             title: L("正在压缩 \(destination.lastPathComponent)", "Compressing \(destination.lastPathComponent)"),
@@ -1603,6 +1721,7 @@ final class BrowserModel: ObservableObject {
             showFlash(L("请先选中 zip 压缩包", "Select a ZIP archive"))
             return
         }
+        if blockedByUnauthorized(archives) { return }
 
         if toOwnFolder {
             let destinations = archives.map {
@@ -1725,6 +1844,7 @@ final class BrowserModel: ObservableObject {
     func moveSelectionToTrash() {
         let targets = selectedItems
         guard !targets.isEmpty else { return }
+        if blockedByUnauthorized(targets) { return }
 
         var failures: [String] = []
         var trashed: [(original: URL, inTrash: URL)] = []
@@ -1792,6 +1912,7 @@ final class BrowserModel: ObservableObject {
     func requestPermanentDelete() {
         let targets = selectedItems
         guard !targets.isEmpty else { return }
+        if blockedByUnauthorized(targets) { return }
         pendingPermanentDelete = targets
     }
 

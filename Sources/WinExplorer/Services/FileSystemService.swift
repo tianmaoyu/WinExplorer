@@ -11,7 +11,10 @@ enum FileSystemService {
         .isSymbolicLinkKey,
         .fileSizeKey,
         .contentModificationDateKey,
-        .localizedNameKey
+        .localizedNameKey,
+        // 和上面几个 key 同一次 stat 拿到，不额外付出系统调用；
+        // 有它才能在列表里区分「能读」和「不给读」，而不去真的打开文件试探
+        .isReadableKey
     ]
 
     static func contents(of directory: URL) throws -> [FileItem] {
@@ -31,6 +34,8 @@ enum FileSystemService {
         let isDirectory = values.isDirectory ?? false
         let isPackage = values.isPackage ?? false
         let name = values.localizedName ?? url.lastPathComponent
+        // nil 说明系统没给出结论，按可读处理：宁可不加锁，也不要误把一个正常文件变淡
+        let access: AccessState = values.isReadable == false ? .denied : .granted
 
         return FileItem(
             url: url,
@@ -40,7 +45,8 @@ enum FileSystemService {
             isHidden: values.isHidden ?? name.hasPrefix("."),
             size: isDirectory ? nil : Int64(values.fileSize ?? 0),
             modified: values.contentModificationDate,
-            kind: kindDescription(url: url, isDirectory: isDirectory, isPackage: isPackage)
+            kind: kindDescription(url: url, isDirectory: isDirectory, isPackage: isPackage),
+            access: access
         )
     }
 

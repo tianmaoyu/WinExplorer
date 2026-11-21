@@ -603,10 +603,7 @@ struct FileRow: View {
     var body: some View {
         FileListLayout.row(widths: widths) {
             HStack(spacing: 7) {
-                Image(nsImage: IconProvider.shared.icon(for: item.url))
-                    .resizable()
-                    .interpolation(.high)
-                    .frame(width: 16, height: 16)
+                FileItemIcon(item: item, size: 16)
 
                 if isRenaming {
                     RenameInlineView(model: model, item: item)
@@ -639,8 +636,8 @@ struct FileRow: View {
                 .fill(backgroundColor)
                 .padding(.horizontal, 4)
         }
-        // 剪切中的项整体变淡，和 Windows 的"待移动"观感一致
-        .opacity(isCut ? 0.5 : 1)
+        // 剪切中的项整体变淡（Windows 的"待移动"观感）；未授权项更淡一些
+        .opacity(rowOpacity)
         .overlay {
             if isDropTarget {
                 RoundedRectangle(cornerRadius: 4)
@@ -652,6 +649,22 @@ struct FileRow: View {
             }
         }
         .onHover { hovered = $0 }
+        .help(helpText)
+    }
+
+    /// 悬停提示：未授权项直接说清楚"打开时会提示授权"，避免用户以为是坏了
+    private var helpText: String {
+        item.isAccessible
+            ? item.name
+            : L("未授权：「\(item.name)」需要授权后才能打开", "Not authorized: “\(item.name)” needs permission to open")
+    }
+
+    /// 未授权项整体变淡；剪切中的项也变淡，两者取更淡的那个
+    private var rowOpacity: Double {
+        var value = 1.0
+        if isCut { value = 0.5 }
+        if item.access.isDenied { value = min(value, 0.42) }
+        return value
     }
 
     /// 主文件名长度（不含扩展名），重命名时默认只选中这一段
@@ -688,10 +701,7 @@ struct CompactRow: View {
 
     var body: some View {
         HStack(spacing: 7) {
-            Image(nsImage: IconProvider.shared.icon(for: item.url))
-                .resizable()
-                .interpolation(.high)
-                .frame(width: 16, height: 16)
+            FileItemIcon(item: item, size: 16)
 
             if isRenaming {
                 RenameInlineView(model: model, item: item)
@@ -712,7 +722,7 @@ struct CompactRow: View {
                 .fill(backgroundColor)
                 .padding(.horizontal, 4)
         }
-        .opacity(isCut ? 0.5 : 1)
+        .opacity(rowOpacity)
         .overlay {
             if isDropTarget {
                 RoundedRectangle(cornerRadius: 4)
@@ -723,6 +733,22 @@ struct CompactRow: View {
             }
         }
         .onHover { hovered = $0 }
+        .help(helpText)
+    }
+
+    /// 悬停提示：未授权项直接说清楚"打开时会提示授权"，避免用户以为是坏了
+    private var helpText: String {
+        item.isAccessible
+            ? item.name
+            : L("未授权：「\(item.name)」需要授权后才能打开", "Not authorized: “\(item.name)” needs permission to open")
+    }
+
+    /// 未授权项整体变淡；剪切中的项也变淡，两者取更淡的那个
+    private var rowOpacity: Double {
+        var value = 1.0
+        if isCut { value = 0.5 }
+        if item.access.isDenied { value = min(value, 0.42) }
+        return value
     }
 
     private var backgroundColor: Color {
@@ -746,10 +772,7 @@ struct IconCell: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            Image(nsImage: IconProvider.shared.icon(for: item.url))
-                .resizable()
-                .interpolation(.high)
-                .frame(width: 44, height: 44)
+            FileItemIcon(item: item, size: 44)
 
             if isRenaming {
                 RenameInlineView(model: model, item: item, fontSize: 11)
@@ -770,7 +793,7 @@ struct IconCell: View {
             RoundedRectangle(cornerRadius: 6)
                 .fill(backgroundColor)
         }
-        .opacity(isCut ? 0.5 : 1)
+        .opacity(rowOpacity)
         .overlay {
             if isDropTarget {
                 RoundedRectangle(cornerRadius: 6)
@@ -780,6 +803,22 @@ struct IconCell: View {
             }
         }
         .onHover { hovered = $0 }
+        .help(helpText)
+    }
+
+    /// 悬停提示：未授权项直接说清楚"打开时会提示授权"，避免用户以为是坏了
+    private var helpText: String {
+        item.isAccessible
+            ? item.name
+            : L("未授权：「\(item.name)」需要授权后才能打开", "Not authorized: “\(item.name)” needs permission to open")
+    }
+
+    /// 未授权项整体变淡；剪切中的项也变淡，两者取更淡的那个
+    private var rowOpacity: Double {
+        var value = 1.0
+        if isCut { value = 0.5 }
+        if item.access.isDenied { value = min(value, 0.42) }
+        return value
     }
 
     private var backgroundColor: Color {

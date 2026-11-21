@@ -1100,6 +1100,93 @@ enum SelfTest {
         model.closeAbout()
         check("关于面板关闭", !model.showsAbout && model.batchRename == nil)
 
+        // MARK: 访问权限（未授权项淡化 + 只在主动操作时提示）
+        let permRoot = root.appendingPathComponent("perm")
+        let lockedDir = permRoot.appendingPathComponent("locked")
+        let openDir = permRoot.appendingPathComponent("open")
+        try? fm.createDirectory(at: lockedDir, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: openDir, withIntermediateDirectories: true)
+        let secretFile = permRoot.appendingPathComponent("secret.txt")
+        let normalFile = permRoot.appendingPathComponent("normal.txt")
+        fm.createFile(atPath: secretFile.path, contents: Data("s".utf8))
+        fm.createFile(atPath: normalFile.path, contents: Data("n".utf8))
+        fm.createFile(atPath: lockedDir.appendingPathComponent("inner.txt").path, contents: Data("i".utf8))
+        fm.createFile(atPath: openDir.appendingPathComponent("visible.txt").path, contents: Data("v".utf8))
+        // 先恢复权限，保证临时目录能删干净
+        defer {
+            try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: lockedDir.path)
+            try? fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: secretFile.path)
+        }
+        try? fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: lockedDir.path)
+        try? fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: secretFile.path)
+
+        let permModel = BrowserModel(startAt: permRoot)
+        check("未授权文件仍然会列出来", permModel.items.contains { $0.name == "secret.txt" })
+        check("未授权文件标记为 denied",
+              permModel.items.first { $0.name == "secret.txt" }?.access == .denied,
+              "实际 \(String(describing: permModel.items.first { $0.name == "secret.txt" }?.access))")
+        check("未授权文件夹标记为 denied",
+              permModel.items.first { $0.name == "locked" }?.access == .denied)
+        check("已授权项保持 granted",
+              permModel.items.first { $0.name == "normal.txt" }?.access == .granted)
+        check("列目录本身不会弹授权", permModel.accessRequest == nil)
+
+        if let secret = permModel.items.first(where: { $0.name == "secret.txt" }) {
+            check("未授权项的悬停提示说明需要授权",
+                  !secret.isAccessible && secret.access.isDenied)
+            permModel.open(secret)
+            check("主动打开未授权文件才提示授权", permModel.accessRequest != nil)
+            check("提示只针对被点的那一项",
+                  permModel.accessRequest?.items.map(\.name) == ["secret.txt"])
+            check("授权浮层算作模态（不误操作后台列表）", permModel.hasModalOverlay)
+            permModel.cancelAccessRequest()
+            check("取消授权提示后回到普通状态", permModel.accessRequest == nil)
+        } else {
+            check("未授权文件仍能定位", false)
+        }
+
+        // 进入未授权目录：给授权浮层，而不是一行错误条
+        let beforeLocked = permModel.currentURL
+        permModel.navigate(to: lockedDir)
+        check("进入未授权目录弹授权而不是错误条",
+              permModel.accessRequest != nil && permModel.errorMessage == nil
+                  && permModel.currentURL == beforeLocked,
+              "request=\(permModel.accessRequest != nil) error=\(permModel.errorMessage ?? "nil")")
+        check("整目录被拒时不对单个项目提示", permModel.accessRequest?.items.isEmpty == true)
+        permModel.cancelAccessRequest()
+
+        // 嵌套：放开父目录后，子项仍按自己的权限逐个判定，不会连带全放
+        try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: lockedDir.path)
+        permModel.refreshFromDisk()
+        check("授权父目录后它本身恢复 granted",
+              permModel.items.first { $0.name == "locked" }?.access == .granted)
+        permModel.navigate(to: lockedDir)
+        check("能进入刚授权的目录", permModel.currentURL.standardizedFileURL.path == lockedDir.standardizedFileURL.path)
+        check("授权目录里的内容正常显示",
+              permModel.items.first { $0.name == "inner.txt" }?.access == .granted)
+        check("进入已授权目录不再提示", permModel.accessRequest == nil)
+
+        // 授权文件后重新探测：状态回到 granted，其它项不受影响
+        try? fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: secretFile.path)
+        permModel.navigate(to: permRoot)
+        check("授权文件后恢复 granted",
+              permModel.items.first { $0.name == "secret.txt" }?.access == .granted)
+        check("权限探测本身不留副作用",
+              permModel.errorMessage == nil && permModel.accessRequest == nil)
+
+        check("能识别权限类错误",
+              PermissionService.isPermissionDenied(
+                  NSError(domain: NSCocoaErrorDomain, code: CocoaError.fileReadNoPermission.rawValue)
+              ))
+        check("普通错误不会误判成权限错误",
+              !PermissionService.isPermissionDenied(
+                  NSError(domain: NSCocoaErrorDomain, code: CocoaError.fileNoSuchFile.rawValue)
+              ))
+        check("桌面被认作需要系统设置的位置",
+              PermissionService.needsSystemSettings(URL(fileURLWithPath: NSHomeDirectory() + "/Desktop")))
+        check("普通临时目录不需要系统设置",
+              !PermissionService.needsSystemSettings(permRoot))
+
         check("本地化按当前语言取文案", L("甲", "A") == (L10n.isEnglish ? "A" : "甲"))
 
         let before = model.currentURL

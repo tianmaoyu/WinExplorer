@@ -2,7 +2,7 @@
 
 macOS 上的「Windows 资源管理器」式文件浏览器，SwiftUI + Swift 原生实现，无 Xcode 工程、无第三方依赖。
 
-当前版本：**1.1.0**（地址栏视觉向 Windows 11 对齐），窗口尺寸 1060×680，启动后回到上次浏览的目录。路线图（26 项）已全部落地。
+当前版本：**1.2.0**（权限展示与授权交互），窗口尺寸 1060×680，启动后回到上次浏览的目录。路线图（26 项）已全部落地。
 本阶段的重点是把「文件夹操作」做扎实，应用包（`.app`）一律按普通文件处理，不做应用专属逻辑。
 
 ## 已实现
@@ -50,6 +50,8 @@ macOS 上的「Windows 资源管理器」式文件浏览器，SwiftUI + Swift �
 | **菜单栏常驻 + 全局唤起** | 菜单栏文件夹图标：打开主窗口 / 个人文件夹 / 下载 / 桌面 / 退出；`⌥⌘E` 在任何 App 里把窗口叫回来（Carbon 热键，不需要辅助功能权限）；关窗不退出，点 Dock 或热键重新唤出 |
 | **关于面板** | 苹果菜单「关于 WinExplorer」：应用图标、版本号、界面语言、全局快捷键、技术栈，可一键复制诊断信息 |
 | **中英双语** | 界面文案跟随系统语言，`-AppleLanguages "(en)"` 可整套切英文；菜单、工具栏、侧边栏、右键菜单、状态栏、各个面板全部覆盖 |
+| **未授权项** | 系统不给读的文件 / 文件夹**照常列出**，但整行变淡（42% 不透明度）、图标换成淡符号 + 橙色锁徽标，大小显示 `—`；悬停提示「未授权：需要授权后才能打开」；状态栏显示「N 项未授权」。**列目录永远不会为子项弹授权框** |
+| **授权交互** | 只有主动打开 / 预览 / 复制 / 剪切 / 删除 / 压缩未授权项，或主动进入打不开的目录时，才弹出窗口内浮层：说明是哪一项、为什么、以及「在 Finder 中显示」「选择此项目以授权…」（`NSOpenPanel` 预选该项）。授权成功即刷新，锁与淡化消失；仍失败会说明是文件权限位问题并引导去 Finder 改。桌面 / 文稿 / 下载 / 外置卷会额外给「打开系统设置」 |
 | 新建文件夹 | 重名自动编号「新建文件夹 2」，建完自动选中 |
 | 隐藏文件开关 | 默认隐藏 `.` 开头的文件和系统隐藏项 |
 | 右键菜单 | 打开 / 在 Finder 中显示 / 剪切 / 复制 / 粘贴到此处（文件夹）/ 复制路径 / 重命名 / 删除 / 刷新 |
@@ -113,11 +115,11 @@ App 用 ad-hoc 签名（`codesign -s -`）。首次访问桌面/文稿会弹一�
 
 | 环境变量 | 作用 |
 |---|---|
-| `WINEXPLORER_SELFTEST=1` | 在临时目录跑 233 项逻辑自检（读取、排序、多选、键盘焦点、导航、新建、重命名、删除、剪贴板、拖放、撤销重做、地址栏、搜索、属性面板、自动刷新、标签页、收藏夹、批量重命名、压缩解压、文件夹大小、位置分区、关于面板、QuickLook 预览列表、错误处理），打印 PASS/FAIL 后退出 |
+| `WINEXPLORER_SELFTEST=1` | 在临时目录跑 255 项逻辑自检（读取、排序、多选、键盘焦点、导航、新建、重命名、删除、剪贴板、拖放、撤销重做、地址栏、搜索、属性面板、自动刷新、标签页、收藏夹、批量重命名、压缩解压、文件夹大小、位置分区、关于面板、权限状态与授权拦截、QuickLook 预览列表、错误处理），打印 PASS/FAIL 后退出 |
 | `WINEXPLORER_START=/path` | 启动即打开指定目录，便于截图验收 |
 | `WINEXPLORER_SNAPSHOT=/tmp/x.png` | 窗口渲染完成后自截图再退出（用于无「屏幕录制」权限的环境） |
 | `WINEXPLORER_SNAPSHOT_DELAY=0.5` | 覆盖截图前的等待秒数，用来抓复制进度这类瞬时状态 |
-| `WINEXPLORER_KEYS=down,down,cmd+a` | 截图前先向窗口发按键，走真实响应链验证键盘；`menu:cmd+a` 走菜单派发，`fn+a` 复现 Command 被重映射的情况，`nav:/某个/路径` 跳目录，`sel:片段` 选中名字含该片段的所有项，`drop:/某个/路径` 点亮某个落点，`drag:/某个/路径` 模拟一次拖拽，`type:文本` 往当前焦点输入框里打字，`touch:文件名` 在当前目录造一个文件，`preview:/路径` 直接预览某个文件，`tab:new|close|next|prev` 操作标签页，`favorite:add|clear` 操作收藏夹，`rename:batch[:基名]` 打开批量重命名面板，`archive:zip|unzip|unzip-here` 压缩 / 解压当前选区，`sizes:on|off` 切换文件夹大小，`about` 打开关于面板 |
+| `WINEXPLORER_KEYS=down,down,cmd+a` | 截图前先向窗口发按键，走真实响应链验证键盘；`menu:cmd+a` 走菜单派发，`fn+a` 复现 Command 被重映射的情况，`nav:/某个/路径` 跳目录，`sel:片段` 选中名字含该片段的所有项，`drop:/某个/路径` 点亮某个落点，`drag:/某个/路径` 模拟一次拖拽，`type:文本` 往当前焦点输入框里打字，`touch:文件名` 在当前目录造一个文件，`preview:/路径` 直接预览某个文件，`tab:new|close|next|prev` 操作标签页，`favorite:add|clear` 操作收藏夹，`rename:batch[:基名]` 打开批量重命名面板，`archive:zip|unzip|unzip-here` 压缩 / 解压当前选区，`sizes:on|off` 切换文件夹大小，`about` 打开关于面板，`open:名称` 选中并打开某项（用来看未授权项的授权浮层） |
 | `WINEXPLORER_APPEARANCE=dark|light` | 强制外观，用于深浅色两套截图验收（默认跟随系统） |
 | `WINEXPLORER_LANG=zh|en` | 强制界面语言（默认跟随系统）；想看完整英文界面（含系统提供的类型名）请用 `-AppleLanguages "(en)"` 启动 |
 | `WINEXPLORER_DRAG_DRYRUN=1` | 配合 `drag:` 使用：只打印"这次会拖哪些文件"，不真的进入模态拖拽会话 |
@@ -126,7 +128,7 @@ App 用 ad-hoc 签名（`codesign -s -`）。首次访问桌面/文稿会弹一�
 WINEXPLORER_SELFTEST=1 ./build/WinExplorer.app/Contents/MacOS/WinExplorer
 ```
 
-最近一次自检结果：233/233 PASS（zh / en 两种语言各跑一遍都通过）。所有用例都在临时目录内，自检期间不写系统剪贴板、不写用户偏好、不开目录监听、不注册系统快捷键。
+最近一次自检结果：255/255 PASS（zh / en 两种语言各跑一遍都通过）。所有用例都在临时目录内，自检期间不写系统剪贴板、不写用户偏好、不开目录监听、不注册系统快捷键。
 
 ## 代码结构
 
@@ -139,6 +141,7 @@ Sources/WinExplorer/
 │   ├── Clipboard.swift         # 文件剪贴板（复制/剪切两种语义）
 │   ├── UndoEntry.swift         # 一条可撤销操作（标题 + undo/redo）
 │   ├── ViewPreferences.swift   # 视图模式、列宽、偏好持久化（含文件夹大小、菜单栏、热键开关）
+│   ├── AccessState.swift       # 单项访问状态（granted / denied）与授权请求
 │   ├── BatchRename.swift       # 批量重命名状态 + 预览/冲突计算（纯逻辑）
 │   └── FavoritesStore.swift    # 收藏夹（路径持久化）
 ├── Services/
@@ -150,6 +153,7 @@ Sources/WinExplorer/
 │   ├── StatusItemController.swift # 菜单栏常驻图标与菜单
 │   ├── AppIntegration.swift    # 启动/开关变化时装配菜单栏图标与热键
 │   ├── L10n.swift              # 中英双语（跟随系统语言，可用环境变量强制）
+│   ├── PermissionService.swift # 只读权限探测、权限错误识别、授权面板与系统设置入口
 │   ├── DragSupport.swift       # 行探针命中 + AppKit 拖拽会话 + onDrop 解析
 │   ├── DirectoryWatcher.swift  # vnode 事件源 + 防抖，外部改动自动刷新
 │   ├── FileInfoService.swift   # 属性数据 + 文件夹递归统计
@@ -170,6 +174,8 @@ Sources/WinExplorer/
     ├── RenameField.swift       # 行内重命名输入框
     ├── BatchRenameView.swift   # 批量重命名面板浮层（序号命名 / 查找替换 + 逐项预览）
     ├── AboutPanelView.swift    # 关于面板浮层
+    ├── AccessRequestView.swift # 「需要授权才能访问」浮层（只对单个项目）
+    ├── FileItemIcon.swift      # 行图标：可读用系统图标，未授权用淡符号 + 锁徽标
     ├── PathField.swift         # 地址栏输入框（Enter/Tab/Esc）
     ├── SearchField.swift       # 地址栏右侧搜索框（NSSearchField）
     ├── InfoPanelView.swift     # 属性面板浮层
@@ -191,6 +197,8 @@ Sources/WinExplorer/
 - 解压到当前文件夹遇到同名项目会整批拒绝，不做「全部替换 / 跳过」的选择对话框
 - 批量重命名的查找替换是字面量替换，不支持正则与编号通配符
 - 地址栏只接受绝对路径和 `~`，不解析相对路径，也没有历史下拉
+- 权限这一层是"只读探测 + 显式确认"，不是沙盒授权：本 App 非沙盒（要浏览任意路径），所以「选择此项目以授权」**不能**改变文件本身的 POSIX 权限位，也不能替代 macOS 的隐私（TCC）授权；TCC 受保护的位置需要在系统设置里放开
+- TCC 的弹窗粒度是目录，由系统控制：首次读桌面 / 文稿 / 下载 / 外置卷时仍会出现一次系统授权框（应用无法避免，也无法预先知道结果）
 - 地址栏折叠按「段数 > 5」判定，不是按实际像素宽度量出来的；窗口极窄时可能仍显拥挤（`…` 菜单里不丢信息）
 - 地址栏仍在工具栏下方独占一行；Win11 是把它与前进/后退并排放进同一条工具栏
 - 图标同步加载，超大目录（数千项）会有可感知的打开延迟

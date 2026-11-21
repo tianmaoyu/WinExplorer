@@ -11,11 +11,15 @@ struct FileItem: Identifiable, Hashable {
     let size: Int64?
     let modified: Date?
     let kind: String
+    /// 可否读取。`.denied` 的项在列表里变淡带锁，且不会为它触发任何系统弹窗
+    var access: AccessState = .granted
 
     var id: URL { url }
 
     /// 可以"进入"的文件夹（排除 .app 等包）
     var isFolderLike: Bool { isDirectory && !isPackage }
+
+    var isAccessible: Bool { access == .granted }
 }
 
 extension FileItem {

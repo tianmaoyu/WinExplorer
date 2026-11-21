@@ -72,12 +72,22 @@ enum FileInfoService {
         ])
         let attributes = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
 
+        let denied = item.access.isDenied
         var fields: [InfoField] = []
         fields.append(InfoField(id: "kind", label: L("类型", "Kind"), value: item.kind))
 
+        if denied {
+            fields.append(InfoField(
+                id: "access",
+                label: L("访问", "Access"),
+                value: L("未授权（需要授权后才能读取）", "Not authorized (permission required)")
+            ))
+        }
+
         if item.isDirectory {
-            fields.append(InfoField(id: "size", label: L("大小", "Size"), value: L("计算中…", "Calculating…")))
-            fields.append(InfoField(id: "items", label: L("包含", "Contains"), value: L("计算中…", "Calculating…")))
+            let pending = denied ? "—" : L("计算中…", "Calculating…")
+            fields.append(InfoField(id: "size", label: L("大小", "Size"), value: pending))
+            fields.append(InfoField(id: "items", label: L("包含", "Contains"), value: pending))
         } else {
             let logical = Int64(values?.fileSize ?? Int(item.size ?? 0))
             let allocated = Int64(values?.totalFileAllocatedSize ?? values?.fileAllocatedSize ?? Int(logical))
@@ -119,7 +129,9 @@ enum FileInfoService {
             title: item.name,
             kind: item.isDirectory ? L("文件夹", "Folder") : item.kind,
             fields: fields,
-            note: item.isDirectory ? L("正在统计文件夹大小…", "Calculating folder size…") : nil
+            note: denied
+                ? L("未授权：授权之前不会去读它的内容", "Not authorized — nothing is read until you grant access")
+                : (item.isDirectory ? L("正在统计文件夹大小…", "Calculating folder size…") : nil)
         )
     }
 

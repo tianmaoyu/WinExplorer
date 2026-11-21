@@ -24,3 +24,14 @@
 | **悬停底** | 鼠标停在某一段上时出现的浅灰圆角底（`primary @ 7%`） |
 | **落点高亮** | 拖拽文件悬停在某一段上时的蓝色描边 + 18% 底，属于功能反馈，不可省略 |
 | **焦点环** | 编辑态容器的强调色 1.5pt 描边，路径非法时变红 |
+
+## 权限
+
+| 词 | 含义 | 对应代码 |
+|---|---|---|
+| **访问状态** | 单项对我们这个进程「能不能读」的结论，只有 `granted` / `denied` 两态 | `AccessState` |
+| **未授权项** | `access == .denied` 的行：整行变淡 + 锁徽标，但照常列出 | `FileItem.access` |
+| **访问探测** | 只读判断可读性（`isReadableFile` / `resourceValues.isReadable`），不打开文件、不递归 | `PermissionService.isReadable` |
+| **授权浮层** | 窗口内的 `AccessRequestView`，只在主动操作未授权项 / 进入被拒目录时出现 | `BrowserModel.accessRequest` |
+| **授权入口** | 浮层里的「选择此项目以授权…」（`NSOpenPanel` 预选该项）与「打开系统设置」（TCC） | `PermissionService.pickInPanel` |
+| **拦截点** | 所有写操作/打开动作的统一闸门，有未授权目标就弹浮层并中止 | `blockedByUnauthorized` |
