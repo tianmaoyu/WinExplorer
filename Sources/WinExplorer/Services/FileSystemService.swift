@@ -17,17 +17,34 @@ enum FileSystemService {
         .isReadableKey
     ]
 
+    /// 预构造：`resourceValues(forKeys:)` 每次调用都传 `Set(resourceKeys)` 会在
+    /// 每个 item 上多分配一个 Set（万级目录里是白白的开销）
+    private static let resourceKeySet = Set(resourceKeys)
+
+    /// 文件类型描述缓存：`UTType(filenameExtension:)` 会查 LaunchServices，
+    /// 同一目录里几百个 .swift/.png 没必要各查一次
+    private static let kindCache: NSCache<NSString, NSString> = {
+        let cache = NSCache<NSString, NSString>()
+        cache.countLimit = 256
+        return cache
+    }()
+
     static func contents(of directory: URL) throws -> [FileItem] {
         let urls = try FileManager.default.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: resourceKeys,
             options: []
         )
-        return urls.compactMap { makeItem(for: $0) }
+        var result: [FileItem] = []
+        result.reserveCapacity(urls.count)
+        for url in urls {
+            if let item = makeItem(for: url) { result.append(item) }
+        }
+        return result
     }
 
     static func makeItem(for url: URL) -> FileItem? {
-        guard let values = try? url.resourceValues(forKeys: Set(resourceKeys)) else {
+        guard let values = try? url.resourceValues(forKeys: resourceKeySet) else {
             return nil
         }
 
@@ -59,8 +76,15 @@ enum FileSystemService {
         if isDirectory { return L("文件夹", "Folder") }
 
         let ext = url.pathExtension
-        guard !ext.isEmpty, let type = UTType(filenameExtension: ext) else { return L("文件", "File") }
-        return type.localizedDescription ?? L("文件", "File")
+        guard !ext.isEmpty else { return L("文件", "File") }
+
+        // 按扩展名缓存：同一目录里几百个同类型文件只查一次 LaunchServices
+        let key = ext.lowercased() as NSString
+        if let cached = kindCache.object(forKey: key) { return cached as String }
+
+        let description = UTType(filenameExtension: ext)?.localizedDescription ?? L("文件", "File")
+        kindCache.setObject(description as NSString, forKey: key)
+        return description
     }
 
     /// 排序规则：文件夹永远在前（和 Windows 资源管理器一致），再按列比较。

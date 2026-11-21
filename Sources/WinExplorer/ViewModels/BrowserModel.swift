@@ -88,9 +88,19 @@ final class BrowserModel: ObservableObject {
     @Published var searchText: String = "" {
         didSet {
             guard searchText != oldValue else { return }
-            applySortAndFilter()
+            // 每敲一个字符都全量过滤 + 排序会明显卡手（排序用 localizedStandardCompare，
+            // 很贵）。输入停 0.18s 后才真正过滤；回车/失焦等路径仍即时生效。
+            guard Self.debouncesSearch else {
+                applySortAndFilter()
+                return
+            }
+            searchDebounce?.cancel()
+            let work = DispatchWorkItem { [weak self] in self?.applySortAndFilter() }
+            searchDebounce = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: work)
         }
     }
+    private var searchDebounce: DispatchWorkItem?
     /// 视图消费后把焦点放进搜索框（⌘F 每次都是新的 token，连按会重新全选）
     @Published private(set) var searchFocusRequest: UUID?
 
@@ -133,6 +143,8 @@ final class BrowserModel: ObservableObject {
     static var computesFolderSizeSynchronously = false
     /// 自检时关掉目录监听（用例会自己造/删文件，自动刷新会干扰断言）
     static var watchesFileSystem = true
+    /// 搜索是否防抖（自检里关掉，设完 searchText 立刻能断言过滤结果）
+    static var debouncesSearch = true
 
     // MARK: - 撤销栈
 
@@ -273,9 +285,11 @@ final class BrowserModel: ObservableObject {
         }
     }
 
-    /// 已经算出来的文件夹大小（path → 大小）
-    @Published private(set) var folderSizes: [String: FolderSizeService.Size] = [:]
-    private var folderSizeJob: FolderSizeJob?
+    /// 已经算出来的文件夹大小（path → 大小）。
+    /// 实现在 FolderSizeCoordinator 里，这里只做转发，视图读到的还是 `model.folderSizes`
+    var folderSizes: [String: FolderSizeService.Size] { folderSizeCoordinator.sizes }
+    private let folderSizeCoordinator = FolderSizeCoordinator()
+    private var folderSizeCancellable: AnyCancellable?
 
     @Published private(set) var backStack: [URL] = []
     @Published private(set) var forwardStack: [URL] = []
@@ -328,6 +342,11 @@ final class BrowserModel: ObservableObject {
         // 全局剪贴板变化 → 本模型也发 objectWillChange，
         // 让「剪切中变淡」在所有标签 / 窗口里同步刷新
         clipboardCancellable = ClipboardStore.shared.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+
+        // 文件夹大小统计搬到了 FolderSizeCoordinator：它的变化也要让视图重绘
+        folderSizeCancellable = folderSizeCoordinator.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
     }
@@ -598,6 +617,7 @@ final class BrowserModel: ObservableObject {
             }
             currentURL = standardized
             allItems = loaded
+            invalidateSortCache()
             directorySignature = Self.signature(of: loaded)
             // 换目录时搜索词不再适用（搜索只针对当前文件夹）
             if directoryChanged { searchText = "" }
@@ -627,8 +647,27 @@ final class BrowserModel: ObservableObject {
         }
     }
 
+    /// 排序结果缓存：过滤（隐藏项 / 搜索词）不改变相对顺序，所以
+    /// 「先排序再过滤」和「先过滤再排序」结果完全一致。缓存全量排序结果后，
+    /// 敲搜索词只需要两趟线性过滤，不再每次重排（排序比较器很贵）。
+    private var sortedCache: (key: String, items: [FileItem])?
+
+    /// allItems 变了就得丢缓存（换目录 / 外部刷新 / 权限状态更新）
+    private func invalidateSortCache() {
+        sortedCache = nil
+    }
+
     private func applySortAndFilter() {
-        var visible = allItems
+        let key = "\(sortColumn.rawValue)|\(sortAscending)"
+        let base: [FileItem]
+        if let cached = sortedCache, cached.key == key {
+            base = cached.items
+        } else {
+            base = FileSystemService.sort(allItems, by: sortColumn, ascending: sortAscending)
+            sortedCache = (key, base)
+        }
+
+        var visible = base
         if !showHidden {
             visible = visible.filter { !$0.isHidden }
         }
@@ -636,7 +675,7 @@ final class BrowserModel: ObservableObject {
         if !query.isEmpty {
             visible = visible.filter { $0.name.localizedStandardContains(query) }
         }
-        items = FileSystemService.sort(visible, by: sortColumn, ascending: sortAscending)
+        items = visible
 
         let visibleURLs = Set(items.map(\.url))
         selection = selection.intersection(visibleURLs)
@@ -652,51 +691,12 @@ final class BrowserModel: ObservableObject {
 
     /// 重排统计任务：缓存直接命中，没算过的丢给后台队列（最多一次 200 个目录）
     private func refreshFolderSizes() {
-        folderSizeJob?.cancel()
-        let job = FolderSizeJob()
-        folderSizeJob = job
-
-        guard showsFolderSizes else {
-            folderSizes = [:]
-            return
-        }
-
-        let folders = items.filter { $0.isDirectory && $0.isAccessible }
-        guard !folders.isEmpty else {
-            folderSizes = [:]
-            return
-        }
-
-        var known: [String: FolderSizeService.Size] = [:]
-        var pending: [URL] = []
-        for folder in folders {
-            let key = folder.url.standardizedFileURL.path
-            if let cached = FolderSizeService.shared.cached(folder.url) {
-                known[key] = cached
-            } else if pending.count < 200 {
-                pending.append(folder.url)
-            }
-        }
-        folderSizes = known
-        guard !pending.isEmpty else { return }
-
-        // 自检模式同步算完，方便断言
-        if Self.computesFolderSizeSynchronously {
-            var result = known
-            for url in pending {
-                let size = FolderSizeService.measure(url)
-                FolderSizeService.shared.store(size, for: url)
-                result[url.standardizedFileURL.path] = size
-            }
-            folderSizes = result
-            return
-        }
-
-        FolderSizeService.shared.compute(pending, job: job) { [weak self] url, size in
-            guard let self, !job.isCancelled else { return }
-            FolderSizeService.shared.store(size, for: url)
-            self.folderSizes[url.standardizedFileURL.path] = size
-        }
+        let folders = items.filter { $0.isDirectory && $0.isAccessible }.map(\.url)
+        folderSizeCoordinator.refresh(
+            folders: folders,
+            enabled: showsFolderSizes,
+            synchronously: Self.computesFolderSizeSynchronously
+        )
     }
 
     // MARK: - 目录监听
@@ -735,6 +735,7 @@ final class BrowserModel: ObservableObject {
             guard signature != directorySignature else { return }
             directorySignature = signature
             allItems = loaded
+            invalidateSortCache()
             applySortAndFilter()
             refreshFolderSizes()
         } catch {
@@ -745,6 +746,7 @@ final class BrowserModel: ObservableObject {
                     copy.access = .denied
                     return copy
                 }
+                invalidateSortCache()
                 applySortAndFilter()
                 if accessRequest == nil {
                     requestAccess(forDirectory: currentURL, reason: error.localizedDescription)

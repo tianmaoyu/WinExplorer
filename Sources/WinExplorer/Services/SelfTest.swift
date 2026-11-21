@@ -12,6 +12,8 @@ enum SelfTest {
         BrowserModel.runsTransfersSynchronously = true
         BrowserModel.computesFolderSizeSynchronously = true
         BrowserModel.watchesFileSystem = false
+        // 搜索防抖会让「设完 searchText 立刻断言」失效，自检里关掉
+        BrowserModel.debouncesSearch = false
         Preferences.enabled = false
 
         var failures = 0
@@ -1386,6 +1388,34 @@ enum SelfTest {
               freshTabs.active.items.contains { $0.name == "新标签.txt" })
 
         check("本地化按当前语言取文案", L("甲", "A") == (L10n.isEnglish ? "A" : "甲"))
+
+        // MARK: 性能重构后的回归点
+        // 嵌套在普通目录里的媒体资料库包也要被递归剪枝（只判根目录是不够的）
+        let nestedLibrary = URL(fileURLWithPath: "/tmp/some/ordinary/folder/图库.photoslibrary")
+        check("文件夹大小：任意层级的资料库包会被剪枝",
+              ProtectedPaths.shouldSkipRecursiveRead(nestedLibrary))
+        check("文件夹大小：家目录受保护子目录会被剪枝",
+              ProtectedPaths.shouldSkipRecursiveRead(
+                URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Music")))
+        check("文件夹大小：普通目录不剪枝",
+              !ProtectedPaths.shouldSkipRecursiveRead(root))
+
+        // 类型描述按扩展名缓存：同类型两项拿到同一个非空描述
+        let txtA = root.appendingPathComponent("small.txt")
+        let txtB = root.appendingPathComponent("other.txt")
+        fm.createFile(atPath: txtB.path, contents: Data("x".utf8))
+        let kindA = FileSystemService.makeItem(for: txtA)?.kind ?? ""
+        let kindB = FileSystemService.makeItem(for: txtB)?.kind ?? ""
+        check("类型描述：同扩展名结果一致且有内容",
+              !kindA.isEmpty && kindA == kindB, "A=\(kindA) B=\(kindB)")
+
+        // 排序缓存：搜索过滤后再清空，顺序应与直接排序一致
+        model.searchText = "small"
+        model.searchText = ""
+        let namesAfterSearch = model.items.map(\.name)
+        let namesDirect = FileSystemService.sort(model.items, by: model.sortColumn,
+                                                 ascending: model.sortAscending).map(\.name)
+        check("排序缓存：过滤来回归位后顺序不变", namesAfterSearch == namesDirect)
 
         // MARK: 打开方式（adr/0010）
         // 只做查询类断言：不真的打开应用，也不改系统默认设置

@@ -83,3 +83,6 @@
 | **候选应用** | LaunchServices 认为能打开该文件的 `.app`，按 bundle id 去重、名称排序、上限 8，按扩展名缓存 | `OpenWithService.applications(for:)` |
 | **一次性打开** | 用指定应用打开，不改系统默认角色绑定 | `NSWorkspace.open(_:withApplicationAt:)` |
 | **默认应用** | 该类文件（按 UTI）在系统里绑定的默认打开应用，双击等同此行为 | `NSWorkspace.setDefaultApplication(at:toOpenFileAt:)` |
+| **文件夹大小协调者** | 文件夹大小统计的任务生命周期、缓存命中、后台计算与进度回填（从 BrowserModel 拆出） | `FolderSizeCoordinator`（adr/0011） |
+| **排序缓存** | 缓存全量排序结果；过滤不改变相对顺序，敲搜索词时只做线性过滤不重排 | `BrowserModel.sortedCache` |
+| **搜索防抖** | 搜索输入停 0.18s 后才过滤，避免每个字符都全量过滤+排序 | `BrowserModel.debouncesSearch` |
