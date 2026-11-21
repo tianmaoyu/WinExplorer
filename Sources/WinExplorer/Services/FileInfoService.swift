@@ -45,12 +45,12 @@ enum FileInfoService {
     static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = "yyyy年M月d日 HH:mm:ss"
+        formatter.dateFormat = L10n.isEnglish ? "MMM d, yyyy HH:mm:ss" : "yyyy年M月d日 HH:mm:ss"
         return formatter
     }()
 
     static func byteText(_ bytes: Int64) -> String {
-        if bytes < 1024 { return "\(bytes) 字节" }
+        if bytes < 1024 { return L("\(bytes) 字节", "\(bytes) bytes") }
         return byteFormatter.string(fromByteCount: bytes)
     }
 
@@ -73,53 +73,53 @@ enum FileInfoService {
         let attributes = (try? FileManager.default.attributesOfItem(atPath: url.path)) ?? [:]
 
         var fields: [InfoField] = []
-        fields.append(InfoField(id: "kind", label: "类型", value: item.kind))
+        fields.append(InfoField(id: "kind", label: L("类型", "Kind"), value: item.kind))
 
         if item.isDirectory {
-            fields.append(InfoField(id: "size", label: "大小", value: "计算中…"))
-            fields.append(InfoField(id: "items", label: "包含", value: "计算中…"))
+            fields.append(InfoField(id: "size", label: L("大小", "Size"), value: L("计算中…", "Calculating…")))
+            fields.append(InfoField(id: "items", label: L("包含", "Contains"), value: L("计算中…", "Calculating…")))
         } else {
             let logical = Int64(values?.fileSize ?? Int(item.size ?? 0))
             let allocated = Int64(values?.totalFileAllocatedSize ?? values?.fileAllocatedSize ?? Int(logical))
-            fields.append(InfoField(id: "size", label: "大小", value: byteText(logical)))
-            fields.append(InfoField(id: "allocated", label: "占用空间", value: byteText(allocated)))
+            fields.append(InfoField(id: "size", label: L("大小", "Size"), value: byteText(logical)))
+            fields.append(InfoField(id: "allocated", label: L("占用空间", "Space Used"), value: byteText(allocated)))
             if !url.pathExtension.isEmpty {
-                fields.append(InfoField(id: "ext", label: "扩展名", value: ".\(url.pathExtension.lowercased())"))
+                fields.append(InfoField(id: "ext", label: L("扩展名", "Extension"), value: ".\(url.pathExtension.lowercased())"))
             }
         }
 
         fields.append(InfoField(
             id: "location",
-            label: "位置",
+            label: L("位置", "Where"),
             value: url.deletingLastPathComponent().path
         ))
 
         if let created = values?.creationDate ?? (attributes[.creationDate] as? Date) {
-            fields.append(InfoField(id: "created", label: "创建时间", value: dateFormatter.string(from: created)))
+            fields.append(InfoField(id: "created", label: L("创建时间", "Created"), value: dateFormatter.string(from: created)))
         }
         if let modified = values?.contentModificationDate ?? (attributes[.modificationDate] as? Date) {
-            fields.append(InfoField(id: "modified", label: "修改时间", value: dateFormatter.string(from: modified)))
+            fields.append(InfoField(id: "modified", label: L("修改时间", "Modified"), value: dateFormatter.string(from: modified)))
         }
 
         fields.append(InfoField(
             id: "permissions",
-            label: "权限",
+            label: L("权限", "Permissions"),
             value: permissionText(attributes: attributes, isDirectory: item.isDirectory)
         ))
         if let owner = attributes[.ownerAccountName] as? String {
-            fields.append(InfoField(id: "owner", label: "所有者", value: owner))
+            fields.append(InfoField(id: "owner", label: L("所有者", "Owner"), value: owner))
         }
         if values?.isSymbolicLink == true,
            let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: url.path) {
-            fields.append(InfoField(id: "link", label: "链接到", value: destination))
+            fields.append(InfoField(id: "link", label: L("链接到", "Symlink To"), value: destination))
         }
 
         return InfoSheetState(
             iconURL: url,
             title: item.name,
-            kind: item.isDirectory ? "文件夹" : item.kind,
+            kind: item.isDirectory ? L("文件夹", "Folder") : item.kind,
             fields: fields,
-            note: item.isDirectory ? "正在统计文件夹大小…" : nil
+            note: item.isDirectory ? L("正在统计文件夹大小…", "Calculating folder size…") : nil
         )
     }
 
@@ -129,7 +129,7 @@ enum FileInfoService {
         state.set("allocated", to: byteText(stats.allocated))
         state.set(
             "items",
-            to: "\(stats.fileCount) 个文件，\(stats.folderCount) 个文件夹"
+            to: L("\(stats.fileCount) 个文件，\(stats.folderCount) 个文件夹", "\(stats.fileCount) file(s), \(stats.folderCount) folder(s)")
         )
         state.note = nil
     }
@@ -142,28 +142,30 @@ enum FileInfoService {
         let knownBytes = items.reduce(Int64(0)) { $0 + ($1.isDirectory ? 0 : ($1.size ?? 0)) }
 
         var fields: [InfoField] = [
-            InfoField(id: "count", label: "已选", value: "\(items.count) 项（\(files) 个文件，\(folders) 个文件夹）"),
-            InfoField(id: "size", label: "大小", value: folders > 0 ? "计算中…" : byteText(knownBytes))
+            InfoField(id: "count", label: L("已选", "Selected"), value: L("\(items.count) 项（\(files) 个文件，\(folders) 个文件夹）", "\(items.count) items (\(files) files, \(folders) folders)")),
+            InfoField(id: "size", label: L("大小", "Size"), value: folders > 0 ? L("计算中…", "Calculating…") : byteText(knownBytes))
         ]
 
         // 同一个目录下才显示位置，跨目录时说明来源不同
         let parents = Set(items.map { $0.url.deletingLastPathComponent().standardizedFileURL.path })
         if parents.count == 1, let parent = parents.first {
-            fields.append(InfoField(id: "location", label: "位置", value: parent))
+            fields.append(InfoField(id: "location", label: L("位置", "Where"), value: parent))
         } else {
-            fields.append(InfoField(id: "location", label: "位置", value: "来自 \(parents.count) 个不同文件夹"))
+            fields.append(InfoField(id: "location", label: L("位置", "Where"),
+                                   value: L("来自 \(parents.count) 个不同文件夹",
+                                            "From \(parents.count) different folders")))
         }
 
         let names = items.prefix(3).map(\.name).joined(separator: "、")
-        let suffix = items.count > 3 ? " 等 \(items.count) 项" : ""
-        fields.append(InfoField(id: "names", label: "项目", value: names + suffix))
+        let suffix = items.count > 3 ? L(" 等 \(items.count) 项", " and \(items.count) items") : ""
+        fields.append(InfoField(id: "names", label: L("项目", "Items"), value: names + suffix))
 
         return InfoSheetState(
             iconURL: items.first?.url ?? URL(fileURLWithPath: "/"),
-            title: "\(items.count) 个项目",
-            kind: "多选",
+            title: L("\(items.count) 个项目", "\(items.count) items"),
+            kind: L("多选", "Multiple Selection"),
             fields: fields,
-            note: folders > 0 ? "正在统计文件夹大小…" : nil
+            note: folders > 0 ? L("正在统计文件夹大小…", "Calculating folder sizes…") : nil
         )
     }
 

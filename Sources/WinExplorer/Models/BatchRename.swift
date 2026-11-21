@@ -11,8 +11,8 @@ enum BatchRenameMode: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .sequence: return "序号命名"
-        case .replace: return "查找替换"
+        case .sequence: return L("序号命名", "Numbering")
+        case .replace: return L("查找替换", "Find & Replace")
         }
     }
 }
@@ -92,10 +92,10 @@ struct BatchRenamePlan {
         }
         var problems: [String] = []
         if state.mode == .sequence, state.baseName.trimmingCharacters(in: .whitespaces).isEmpty {
-            problems.append("请填写基名")
+            problems.append(L("请填写基名", "Enter a base name"))
         }
         if state.mode == .replace, state.findText.isEmpty {
-            problems.append("请填写要查找的内容")
+            problems.append(L("请填写要查找的内容", "Enter text to find"))
         }
 
         // 第一遍：只算新名字
@@ -144,15 +144,15 @@ struct BatchRenamePlan {
             let trimmed = entry.newName.trimmingCharacters(in: .whitespacesAndNewlines)
 
             if trimmed.isEmpty {
-                problem = "名称为空"
+                problem = L("名称为空", "Name is empty")
             } else if entry.newName.contains("/") || entry.newName.contains(":") {
-                problem = "不能包含「/」或「:」"
+                problem = L("不能包含「/」或「:」", "Cannot contain “/” or “:”")
             } else if entry.newName != entry.original {
                 let key = entry.newName.lowercased()
                 if seen.contains(key) {
-                    problem = "与本次另一项重名"
+                    problem = L("与本次另一项重名", "Duplicate name in this batch")
                 } else if existing.contains(key), !freedNames.contains(key) {
-                    problem = "已存在同名项目"
+                    problem = L("已存在同名项目", "A file with this name already exists")
                 }
             }
             if entry.newName != entry.original, problem == nil {

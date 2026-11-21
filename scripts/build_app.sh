@@ -34,6 +34,9 @@ mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 
 cp "$BIN_PATH" "$APP_DIR/Contents/MacOS/WinExplorer"
 cp Support/Info.plist "$APP_DIR/Contents/Info.plist"
+if [ -f Support/AppIcon.icns ]; then
+	cp Support/AppIcon.icns "$APP_DIR/Contents/Resources/AppIcon.icns"
+fi
 printf 'APPL????' > "$APP_DIR/Contents/PkgInfo"
 
 # ad-hoc 签名，让 TCC 权限（桌面/文稿访问）在多次构建间保持稳定

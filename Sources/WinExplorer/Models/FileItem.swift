@@ -35,8 +35,12 @@ extension FileItem {
 
     var sizeText: String {
         guard !isDirectory, let size else { return "—" }
+        return Self.byteText(size)
+    }
+
+    static func byteText(_ size: Int64) -> String {
         if size < 1024 { return "\(size) B" }
-        return Self.sizeFormatter.string(fromByteCount: size)
+        return sizeFormatter.string(fromByteCount: size)
     }
 
     var modifiedText: String {
@@ -56,10 +60,10 @@ enum SortColumn: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .name: return "名称"
-        case .modified: return "修改日期"
-        case .size: return "大小"
-        case .kind: return "类型"
+        case .name: return L("名称", "Name")
+        case .modified: return L("修改日期", "Date Modified")
+        case .size: return L("大小", "Size")
+        case .kind: return L("类型", "Kind")
         }
     }
 }
@@ -75,6 +79,8 @@ struct Crumb: Identifiable {
 struct Place: Identifiable, Hashable {
     let name: String
     let url: URL
+    /// 本机卷 = true；SMB / AFP 这类网络位置 = false
+    var isLocal: Bool = true
     var id: URL { url }
 
     static var quickPlaces: [Place] {
@@ -89,26 +95,51 @@ struct Place: Identifiable, Hashable {
             list.append(Place(name: name, url: standardized))
         }
 
-        add("个人文件夹", fm.homeDirectoryForCurrentUser)
-        add("桌面", fm.urls(for: .desktopDirectory, in: .userDomainMask).first)
-        add("文稿", fm.urls(for: .documentDirectory, in: .userDomainMask).first)
-        add("下载", fm.urls(for: .downloadsDirectory, in: .userDomainMask).first)
-        add("应用程序", URL(fileURLWithPath: "/Applications"))
+        add(L("个人文件夹", "Home"), fm.homeDirectoryForCurrentUser)
+        // iCloud 云盘：目录存在才显示（没登录 iCloud 的机器上没有）
+        add(L("iCloud 云盘", "iCloud Drive"), fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs"))
+        add(L("桌面", "Desktop"), fm.urls(for: .desktopDirectory, in: .userDomainMask).first)
+        add(L("文稿", "Documents"), fm.urls(for: .documentDirectory, in: .userDomainMask).first)
+        add(L("下载", "Downloads"), fm.urls(for: .downloadsDirectory, in: .userDomainMask).first)
+        add(L("应用程序", "Applications"), URL(fileURLWithPath: "/Applications"))
         return list
     }
 
+    /// 本机卷（含根卷）。网络卷单独走 `networkVolumes`，侧边栏分两段显示。
     static var volumes: [Place] {
-        var list = [Place(name: BrowserModel.volumeName, url: URL(fileURLWithPath: "/"))]
-        let keys: [URLResourceKey] = [.volumeNameKey, .volumeIsLocalKey]
-        if let urls = FileManager.default.mountedVolumeURLs(
+        allMountedVolumes().filter(\.isLocal)
+    }
+
+    /// 网络位置（SMB / AFP / WebDAV 等已挂载的远程卷）
+    static var networkVolumes: [Place] {
+        allMountedVolumes().filter { !$0.isLocal }
+    }
+
+    /// 已挂载且可浏览的卷，根卷排最前
+    private static func allMountedVolumes() -> [Place] {
+        var list = [Place(name: BrowserModel.volumeName, url: URL(fileURLWithPath: "/"), isLocal: true)]
+        let keys: [URLResourceKey] = [
+            .volumeNameKey,
+            .volumeLocalizedNameKey,
+            .volumeIsLocalKey,
+            .volumeIsBrowsableKey
+        ]
+        guard let urls = FileManager.default.mountedVolumeURLs(
             includingResourceValuesForKeys: keys,
             options: [.skipHiddenVolumes]
-        ) {
-            for url in urls where url.path != "/" {
-                let values = try? url.resourceValues(forKeys: Set(keys))
-                guard values?.volumeIsLocal == true else { continue }
-                list.append(Place(name: values?.volumeName ?? url.lastPathComponent, url: url))
-            }
+        ) else {
+            return list
+        }
+
+        for url in urls where url.path != "/" {
+            let values = try? url.resourceValues(forKeys: Set(keys))
+            guard values?.volumeIsBrowsable != false else { continue }
+            list.append(Place(
+                name: values?.volumeLocalizedName ?? values?.volumeName ?? url.lastPathComponent,
+                url: url,
+                isLocal: values?.volumeIsLocal ?? true
+            ))
         }
         return list
     }

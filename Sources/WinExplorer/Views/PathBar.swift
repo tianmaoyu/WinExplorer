@@ -57,7 +57,7 @@ struct PathBar: View {
                 .padding(.trailing, 10)
         }
         .frame(height: 34)
-        .help("点空白处输入路径（⌘L）")
+        .help(L("点空白处输入路径（⌘L）", "Click the empty area to type a path (⌘L)"))
     }
 
     /// 右上角的搜索框：只过滤当前文件夹，不递归
@@ -65,7 +65,7 @@ struct PathBar: View {
         SearchField(
             text: model.searchText,
             focusToken: model.searchFocusRequest,
-            placeholder: "搜索",
+            placeholder: L("搜索", "Search"),
             onChange: { model.searchText = $0 },
             onSubmit: {
                 // 回车确认搜索：焦点还回列表，方向键可以继续挑结果
@@ -165,7 +165,7 @@ struct PathBar: View {
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             } else {
-                Text("Tab 补全")
+                Text(L("Tab 补全", "Tab to complete"))
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }

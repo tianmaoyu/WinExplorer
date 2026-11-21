@@ -16,7 +16,7 @@ struct TransferProgressView: View {
                     .font(.system(size: 12, weight: .semibold))
                 Spacer(minLength: 12)
                 if progress.indeterminate {
-                    Text("处理中…")
+                    Text(L("处理中…", "Working…"))
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 } else {
@@ -58,7 +58,7 @@ struct TransferProgressView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 8)
-                Button("取消", action: onCancel)
+                Button(L("取消", "Cancel"), action: onCancel)
                     .controlSize(.small)
             }
         }
@@ -76,7 +76,9 @@ struct TransferProgressView: View {
 
     private var currentLabel: String {
         if progress.currentName.isEmpty {
-            return progress.indeterminate ? "正在调用系统归档工具…" : "准备中…"
+            return progress.indeterminate
+                ? L("正在调用系统归档工具…", "Running the system archive tool…")
+                : L("准备中…", "Preparing…")
         }
         return progress.currentName
     }

@@ -7,8 +7,8 @@ enum ClipboardMode {
 
     var verb: String {
         switch self {
-        case .copy: return "复制"
-        case .cut: return "剪切"
+        case .copy: return L("复制", "Copy")
+        case .cut: return L("剪切", "Cut")
         }
     }
 }

@@ -64,6 +64,11 @@ struct BrowserView: View {
             }
         }
         .overlay {
+            if model.showsAbout {
+                AboutPanelView(onClose: { model.closeAbout() })
+            }
+        }
+        .overlay {
             if model.batchRename != nil {
                 BatchRenameView(model: model)
             }
@@ -120,7 +125,7 @@ struct BrowserView: View {
                 .font(.system(size: 12))
                 .lineLimit(2)
             Spacer(minLength: 8)
-            Button("重试") { model.reload() }
+            Button(L("重试", "Retry")) { model.reload() }
                 .buttonStyle(.link)
                 .font(.system(size: 12))
             Button {
@@ -176,8 +181,10 @@ struct BrowserView: View {
             if event.keyCode == 53 || event.keyCode == 36 || event.keyCode == 76 {
                 model.cancelPermanentDelete()
                 model.closeInfo()
+                model.closeAbout()
             } else if event.keyCode == 34 {
                 model.closeInfo()
+                model.closeAbout()
             }
             return true
         }
@@ -343,23 +350,23 @@ struct BrowserView: View {
                 Image(systemName: "chevron.left")
             }
             .disabled(!model.canGoBack)
-            .help("后退（⌘[）")
+            .help(L("后退（⌘[）", "Back (⌘[)"))
 
             Button(action: model.goForward) {
                 Image(systemName: "chevron.right")
             }
             .disabled(!model.canGoForward)
-            .help("前进（⌘]）")
+            .help(L("前进（⌘]）", "Forward (⌘])"))
 
             Button(action: model.goUp) {
                 Image(systemName: "arrow.up")
             }
             .disabled(!model.canGoUp)
-            .help("上一级（⌘↑）")
+            .help(L("上一级（⌘↑）", "Enclosing folder (⌘↑)"))
         }
 
         ToolbarItemGroup(placement: .primaryAction) {
-            Picker("视图模式", selection: $model.viewMode) {
+            Picker(L("视图模式", "View mode"), selection: $model.viewMode) {
                 ForEach(ViewMode.allCases) { mode in
                     Image(systemName: mode.symbolName)
                         .tag(mode)
@@ -369,23 +376,24 @@ struct BrowserView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .frame(width: 116)
-            .help("视图模式（⌘1 详细信息 / ⌘2 列表 / ⌘3 图标）")
+            .help(L("视图模式（⌘1 详细信息 / ⌘2 列表 / ⌘3 图标）",
+                    "View mode (⌘1 Details / ⌘2 List / ⌘3 Icons)"))
 
             Button {
                 model.paste()
             } label: {
-                Label("粘贴", systemImage: "doc.on.clipboard")
+                Label(L("粘贴", "Paste"), systemImage: "doc.on.clipboard")
             }
             .disabled(!model.canPaste || model.isTransferring)
-            .help("粘贴到当前文件夹（⌘V）")
+            .help(L("粘贴到当前文件夹（⌘V）", "Paste into this folder (⌘V)"))
 
             Button(action: model.createFolder) {
-                Label("新建文件夹", systemImage: "folder.badge.plus")
+                Label(L("新建文件夹", "New Folder"), systemImage: "folder.badge.plus")
             }
-            .help("新建文件夹（⇧⌘N）")
+            .help(L("新建文件夹（⇧⌘N）", "New Folder (⇧⌘N)"))
 
             Menu {
-                Section("视图模式") {
+                Section(L("视图模式", "View Mode")) {
                     ForEach(ViewMode.allCases) { mode in
                         Button {
                             model.viewMode = mode
@@ -399,7 +407,7 @@ struct BrowserView: View {
                     }
                 }
 
-                Section("排序方式") {
+                Section(L("排序方式", "Sort By")) {
                     ForEach(SortColumn.allCases) { column in
                         Button {
                             model.toggleSort(column)
@@ -418,15 +426,17 @@ struct BrowserView: View {
 
                 Divider()
 
-                Toggle("显示隐藏文件", isOn: $model.showHidden)
+                Toggle(L("显示隐藏文件", "Show Hidden Files"), isOn: $model.showHidden)
+
+                Toggle(L("计算文件夹大小", "Calculate Folder Sizes"), isOn: $model.showsFolderSizes)
 
                 Divider()
 
-                Button("刷新") { model.reload() }
+                Button(L("刷新", "Refresh")) { model.reload() }
             } label: {
-                Label("视图选项", systemImage: "slider.horizontal.3")
+                Label(L("视图选项", "View Options"), systemImage: "slider.horizontal.3")
             }
-            .help("排序与显示选项")
+            .help(L("排序与显示选项", "Sorting and display options"))
         }
     }
 }

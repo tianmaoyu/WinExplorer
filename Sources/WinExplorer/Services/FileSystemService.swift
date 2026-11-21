@@ -46,13 +46,15 @@ enum FileSystemService {
 
     private static func kindDescription(url: URL, isDirectory: Bool, isPackage: Bool) -> String {
         if isPackage {
-            return url.pathExtension.lowercased() == "app" ? "应用程序" : "包"
+            return url.pathExtension.lowercased() == "app"
+                ? L("应用程序", "Application")
+                : L("包", "Package")
         }
-        if isDirectory { return "文件夹" }
+        if isDirectory { return L("文件夹", "Folder") }
 
         let ext = url.pathExtension
-        guard !ext.isEmpty, let type = UTType(filenameExtension: ext) else { return "文件" }
-        return type.localizedDescription ?? "文件"
+        guard !ext.isEmpty, let type = UTType(filenameExtension: ext) else { return L("文件", "File") }
+        return type.localizedDescription ?? L("文件", "File")
     }
 
     /// 排序规则：文件夹永远在前（和 Windows 资源管理器一致），再按列比较。

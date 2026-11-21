@@ -29,9 +29,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        AppIntegration.apply()
     }
 
+    /// 开启菜单栏常驻时，关窗不退出，靠菜单栏图标或 ⌥⌘E 叫回来
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        !Preferences.showsMenuBarIcon
+    }
+
+    /// 点 Dock 图标（窗口已关）时把窗口叫回来
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { WindowOpener.shared.showMainWindow() }
+        return true
     }
 }

@@ -2,7 +2,7 @@
 
 macOS 上的「Windows 资源管理器」式文件浏览器，SwiftUI + Swift 原生实现，无 Xcode 工程、无第三方依赖。
 
-当前版本：**0.9.0（批量重命名 + 压缩 / 解压）**，窗口尺寸 1060×680，启动后回到上次浏览的目录。
+当前版本：**1.0.0**，窗口尺寸 1060×680，启动后回到上次浏览的目录。路线图（26 项）已全部落地。
 本阶段的重点是把「文件夹操作」做扎实，应用包（`.app`）一律按普通文件处理，不做应用专属逻辑。
 
 ## 已实现
@@ -44,10 +44,15 @@ macOS 上的「Windows 资源管理器」式文件浏览器，SwiftUI + Swift �
 | **批量重命名** | 多选后 F2 / ⇧⌘R / 右键「批量重命名…」打开面板：**序号命名**（基名 + 分隔符 + 序号，可选起始序号与 2/3/4 位补零）或**查找替换**（可区分大小写、可只改主文件名保留扩展名）；改名前逐项预览，与磁盘已有项目重名 / 改后互相重名 / 名称非法都会标红并禁止执行；两阶段改名支持 A↔B 互换与只改大小写；整批可 ⌘Z 撤销 |
 | **压缩为 zip** | 单选压缩成同名 `.zip`，多选压缩成「当前文件夹名.zip」（每个项目平铺在包根）；重名自动编号「照片 2.zip」；底部忙碌卡片可取消，取消/失败不留半成品；完成后自动选中压缩包 |
 | **解压** | 右键 zip：「解压到「名称」」自动避开重名（照片 → 照片 2），包内只有一个顶层文件夹时自动消掉多余的一层嵌套；「解压到当前文件夹」先查真实文件名，遇到同名直接拒绝，绝不覆盖已有文件 |
+| **文件夹大小** | 「视图 → 计算文件夹大小」开启后，文件夹行异步统计并显示体积（计算中显示 `…`，超过 2 万文件显示 `≥`）；后台串行队列 + 按「路径 + 目录修改时间」缓存，切目录立即取消旧任务，状态栏显示进度；默认关闭（与 Finder / 资源管理器一致） |
+| **iCloud 与网络位置** | 侧边栏「常用」自动带出 iCloud 云盘（登录了才有）；已挂载的 SMB / AFP 网络卷归入「网络」分区，本机卷仍在「设备」 |
+| **菜单栏常驻 + 全局唤起** | 菜单栏文件夹图标：打开主窗口 / 个人文件夹 / 下载 / 桌面 / 退出；`⌥⌘E` 在任何 App 里把窗口叫回来（Carbon 热键，不需要辅助功能权限）；关窗不退出，点 Dock 或热键重新唤出 |
+| **关于面板** | 苹果菜单「关于 WinExplorer」：应用图标、版本号、界面语言、全局快捷键、技术栈，可一键复制诊断信息 |
+| **中英双语** | 界面文案跟随系统语言，`-AppleLanguages "(en)"` 可整套切英文；菜单、工具栏、侧边栏、右键菜单、状态栏、各个面板全部覆盖 |
 | 新建文件夹 | 重名自动编号「新建文件夹 2」，建完自动选中 |
 | 隐藏文件开关 | 默认隐藏 `.` 开头的文件和系统隐藏项 |
 | 右键菜单 | 打开 / 在 Finder 中显示 / 剪切 / 复制 / 粘贴到此处（文件夹）/ 复制路径 / 重命名 / 删除 / 刷新 |
-| 状态栏 | 项目数、选中项名称与大小、当前完整路径 |
+| 状态栏 | 项目数、选中项名称与大小、文件夹大小统计进度、当前完整路径 |
 | 错误处理 | 无权限或目录消失时顶部黄条提示，不崩溃、不跳走 |
 | 表头固定 | 滚动时表头常驻（pinned section header） |
 
@@ -77,6 +82,7 @@ macOS 上的「Windows 资源管理器」式文件浏览器，SwiftUI + Swift �
 | `⌘[` / `⌘]` | 后退 / 前进 |
 | `⌘↑` | 上一级 |
 | `⇧⌘N` | 新建文件夹 |
+| `⌥⌘E` | 全局唤起窗口（任何 App 下都生效） |
 | `⌘O` | 打开选中项 |
 | `⌘R` | 刷新 |
 | `⇧⌘.` | 显示/隐藏隐藏文件 |
@@ -87,7 +93,13 @@ macOS 上的「Windows 资源管理器」式文件浏览器，SwiftUI + Swift �
 ```bash
 ./scripts/build_app.sh          # release 构建，产物 build/WinExplorer.app
 open build/WinExplorer.app
+
+./scripts/make_icon.sh          # 重新生成 Support/AppIcon.icns（改图标后跑一次）
+./scripts/package_dmg.sh        # 打包 build/WinExplorer-<版本>.dmg（拖进「应用程序」）
+./scripts/package_pkg.sh        # 打包 build/WinExplorer-<版本>.pkg（装到 /Applications）
 ```
+
+DMG / PKG 都没有开发者证书签名，装到别的机器首次打开会被 Gatekeeper 拦一次，右键「打开」即可。
 
 脚本会自动处理本机两个坑：
 
@@ -100,18 +112,19 @@ App 用 ad-hoc 签名（`codesign -s -`）。首次访问桌面/文稿会弹一�
 
 | 环境变量 | 作用 |
 |---|---|
-| `WINEXPLORER_SELFTEST=1` | 在临时目录跑 214 项逻辑自检（读取、排序、多选、键盘焦点、导航、新建、重命名、删除、剪贴板、拖放、撤销重做、地址栏、搜索、属性面板、自动刷新、标签页、收藏夹、批量重命名、压缩解压、QuickLook 预览列表、错误处理），打印 PASS/FAIL 后退出 |
+| `WINEXPLORER_SELFTEST=1` | 在临时目录跑 229 项逻辑自检（读取、排序、多选、键盘焦点、导航、新建、重命名、删除、剪贴板、拖放、撤销重做、地址栏、搜索、属性面板、自动刷新、标签页、收藏夹、批量重命名、压缩解压、文件夹大小、位置分区、关于面板、QuickLook 预览列表、错误处理），打印 PASS/FAIL 后退出 |
 | `WINEXPLORER_START=/path` | 启动即打开指定目录，便于截图验收 |
 | `WINEXPLORER_SNAPSHOT=/tmp/x.png` | 窗口渲染完成后自截图再退出（用于无「屏幕录制」权限的环境） |
 | `WINEXPLORER_SNAPSHOT_DELAY=0.5` | 覆盖截图前的等待秒数，用来抓复制进度这类瞬时状态 |
-| `WINEXPLORER_KEYS=down,down,cmd+a` | 截图前先向窗口发按键，走真实响应链验证键盘；`menu:cmd+a` 走菜单派发，`fn+a` 复现 Command 被重映射的情况，`nav:/某个/路径` 跳目录，`sel:片段` 选中名字含该片段的所有项，`drop:/某个/路径` 点亮某个落点，`drag:/某个/路径` 模拟一次拖拽，`type:文本` 往当前焦点输入框里打字，`touch:文件名` 在当前目录造一个文件，`preview:/路径` 直接预览某个文件，`tab:new|close|next|prev` 操作标签页，`favorite:add|clear` 操作收藏夹，`rename:batch[:基名]` 打开批量重命名面板，`archive:zip|unzip|unzip-here` 压缩 / 解压当前选区 |
+| `WINEXPLORER_KEYS=down,down,cmd+a` | 截图前先向窗口发按键，走真实响应链验证键盘；`menu:cmd+a` 走菜单派发，`fn+a` 复现 Command 被重映射的情况，`nav:/某个/路径` 跳目录，`sel:片段` 选中名字含该片段的所有项，`drop:/某个/路径` 点亮某个落点，`drag:/某个/路径` 模拟一次拖拽，`type:文本` 往当前焦点输入框里打字，`touch:文件名` 在当前目录造一个文件，`preview:/路径` 直接预览某个文件，`tab:new|close|next|prev` 操作标签页，`favorite:add|clear` 操作收藏夹，`rename:batch[:基名]` 打开批量重命名面板，`archive:zip|unzip|unzip-here` 压缩 / 解压当前选区，`sizes:on|off` 切换文件夹大小，`about` 打开关于面板 |
+| `WINEXPLORER_LANG=zh|en` | 强制界面语言（默认跟随系统）；想看完整英文界面（含系统提供的类型名）请用 `-AppleLanguages "(en)"` 启动 |
 | `WINEXPLORER_DRAG_DRYRUN=1` | 配合 `drag:` 使用：只打印"这次会拖哪些文件"，不真的进入模态拖拽会话 |
 
 ```bash
 WINEXPLORER_SELFTEST=1 ./build/WinExplorer.app/Contents/MacOS/WinExplorer
 ```
 
-最近一次自检结果：214/214 PASS（所有用例都在临时目录内，自检期间不写系统剪贴板、不写用户偏好、不开目录监听）。
+最近一次自检结果：229/229 PASS（zh / en 两种语言各跑一遍都通过）。所有用例都在临时目录内，自检期间不写系统剪贴板、不写用户偏好、不开目录监听、不注册系统快捷键。
 
 ## 代码结构
 
@@ -123,13 +136,18 @@ Sources/WinExplorer/
 │   ├── FileItem.swift          # 行数据模型、列定义、面包屑、侧边栏位置
 │   ├── Clipboard.swift         # 文件剪贴板（复制/剪切两种语义）
 │   ├── UndoEntry.swift         # 一条可撤销操作（标题 + undo/redo）
-│   ├── ViewPreferences.swift   # 视图模式、列宽、偏好持久化
+│   ├── ViewPreferences.swift   # 视图模式、列宽、偏好持久化（含文件夹大小、菜单栏、热键开关）
 │   ├── BatchRename.swift       # 批量重命名状态 + 预览/冲突计算（纯逻辑）
 │   └── FavoritesStore.swift    # 收藏夹（路径持久化）
 ├── Services/
 │   ├── FileSystemService.swift # 目录读取 + 排序（文件夹优先、自然排序）
 │   ├── TransferService.swift   # 递归复制/移动、同卷判定、副本命名、进度与取消
 │   ├── ArchiveService.swift    # zip 压缩/解压（ditto / zip 子进程）+ 目标命名与冲突检查
+│   ├── FolderSizeService.swift # 文件夹大小后台统计（串行队列 + mtime 缓存 + 取消标记）
+│   ├── GlobalHotKey.swift      # Carbon 全局热键（⌥⌘E，免辅助功能权限）
+│   ├── StatusItemController.swift # 菜单栏常驻图标与菜单
+│   ├── AppIntegration.swift    # 启动/开关变化时装配菜单栏图标与热键
+│   ├── L10n.swift              # 中英双语（跟随系统语言，可用环境变量强制）
 │   ├── DragSupport.swift       # 行探针命中 + AppKit 拖拽会话 + onDrop 解析
 │   ├── DirectoryWatcher.swift  # vnode 事件源 + 防抖，外部改动自动刷新
 │   ├── FileInfoService.swift   # 属性数据 + 文件夹递归统计
@@ -149,6 +167,7 @@ Sources/WinExplorer/
     ├── TransferProgressView.swift  # 复制/移动进度卡片（也用于压缩解压的忙碌态）
     ├── RenameField.swift       # 行内重命名输入框
     ├── BatchRenameView.swift   # 批量重命名面板浮层（序号命名 / 查找替换 + 逐项预览）
+    ├── AboutPanelView.swift    # 关于面板浮层
     ├── PathField.swift         # 地址栏输入框（Enter/Tab/Esc）
     ├── SearchField.swift       # 地址栏右侧搜索框（NSSearchField）
     ├── InfoPanelView.swift     # 属性面板浮层
@@ -171,7 +190,10 @@ Sources/WinExplorer/
 - 批量重命名的查找替换是字面量替换，不支持正则与编号通配符
 - 地址栏只接受绝对路径和 `~`，不解析相对路径，也没有历史下拉
 - 图标同步加载，超大目录（数千项）会有可感知的打开延迟
-- 未做目录大小统计（文件夹大小显示 `—`，和 Windows 默认行为一致）
+- 文件夹大小默认关闭：开启后按当前目录的文件夹逐个统计，结果缓存到目录修改时间变化为止；「按大小」排序仍按文件真实大小，不把算出来的文件夹体积算进去
+- 网络卷（SMB/AFP）读取走系统同步 API，共享盘掉线时打开目录可能卡顿几秒
+- 本地化覆盖所有界面文案；文件的「类型」列由系统 UTType 提供，跟随进程语言而不是应用内开关
+- DMG / PKG 未签名，也没有公证（无开发者账号）
 - 「应用程序」目录里的 `.app` 按普通文件对待，没有应用专属信息（版本、签名等）
 
 ## 路线图
@@ -198,8 +220,8 @@ Sources/WinExplorer/
 ### Phase 4 · 系统集成
 - ✅ QuickLook（QLPreviewPanel）、✅ ⌘I 属性面板、✅ 压缩 / 解压（zip）、打开方式菜单
 - ✅ 侧边栏收藏夹自定义（拖入即收藏）
-- 全局快捷键唤出；菜单栏常驻模式（LSUIElement + NSPanel）
-- 打包 `.pkg` / DMG、开机自启（LaunchAgent）
+- ✅ 全局快捷键唤出（⌥⌘E）；✅ 菜单栏常驻图标
+- ✅ 打包 `.pkg` / DMG、✅ App 图标、✅ 关于窗口；开机自启（LaunchAgent）仍未做
 
 ### Phase 5 · 进阶
-- ✅ 批量重命名；目录大小异步统计、网络位置与挂载卷、Total Commander 式双栏
+- ✅ 批量重命名、✅ 目录大小异步统计、✅ 网络位置与挂载卷；Total Commander 式双栏仍未做

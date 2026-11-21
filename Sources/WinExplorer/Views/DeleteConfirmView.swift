@@ -18,7 +18,7 @@ struct DeleteConfirmView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
-                    Text("彻底删除")
+                    Text(L("彻底删除", "Delete Immediately"))
                         .font(.system(size: 13, weight: .semibold))
                 }
 
@@ -29,9 +29,9 @@ struct DeleteConfirmView: View {
 
                 HStack(spacing: 8) {
                     Spacer()
-                    Button("取消", action: onCancel)
+                    Button(L("取消", "Cancel"), action: onCancel)
                         .keyboardShortcut(.cancelAction)
-                    Button("彻底删除", action: onConfirm)
+                    Button(L("彻底删除", "Delete"), action: onConfirm)
                         .buttonStyle(.borderedProminent)
                         .tint(.red)
                 }
@@ -49,8 +49,11 @@ struct DeleteConfirmView: View {
     }
 
     private var message: String {
-        let names = items.prefix(3).map(\.name).joined(separator: "、")
-        let suffix = items.count > 3 ? " 等 \(items.count) 项" : ""
-        return "确定要彻底删除「\(names)」\(suffix)吗？此操作不可恢复，不会进入废纸篓。"
+        let names = items.prefix(3).map(\.name).joined(separator: L("、", ", "))
+        let suffix = items.count > 3 ? L(" 等 \(items.count) 项", " and \(items.count) items") : ""
+        return L(
+            "确定要彻底删除「\(names)」\(suffix)吗？此操作不可恢复，不会进入废纸篓。",
+            "Delete “\(names)”\(suffix) permanently? This cannot be undone and does not go to the Trash."
+        )
     }
 }

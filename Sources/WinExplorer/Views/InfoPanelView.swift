@@ -44,11 +44,11 @@ struct InfoPanelView: View {
                 Divider()
 
                 HStack(spacing: 8) {
-                    Button("在 Finder 中显示", action: onReveal)
+                    Button(L("在 Finder 中显示", "Show in Finder"), action: onReveal)
                         .buttonStyle(.link)
                         .font(.system(size: 12))
                     Spacer()
-                    Button("好", action: onClose)
+                    Button(L("好", "OK"), action: onClose)
                         .keyboardShortcut(.defaultAction)
                 }
                 .padding(.horizontal, 18)
@@ -94,7 +94,7 @@ struct InfoPanelView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .help("关闭（Esc）")
+            .help(L("关闭（Esc）", "Close (Esc)"))
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 14)

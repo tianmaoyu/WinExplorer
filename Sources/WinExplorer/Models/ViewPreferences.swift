@@ -11,9 +11,9 @@ enum ViewMode: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .details: return "详细信息"
-        case .list: return "列表"
-        case .icons: return "图标"
+        case .details: return L("详细信息", "Details")
+        case .list: return L("列表", "List")
+        case .icons: return L("图标", "Icons")
         }
     }
 
@@ -125,6 +125,42 @@ enum Preferences {
         set {
             guard enabled else { return }
             store.set(newValue, forKey: "lastDirectory")
+        }
+    }
+
+    /// 在列表里显示文件夹大小（默认关闭，和 Finder / 资源管理器一致：需要显式开启）
+    static var showsFolderSizes: Bool {
+        get {
+            guard enabled, store.object(forKey: "showsFolderSizes") != nil else { return false }
+            return store.bool(forKey: "showsFolderSizes")
+        }
+        set {
+            guard enabled else { return }
+            store.set(newValue, forKey: "showsFolderSizes")
+        }
+    }
+
+    /// 菜单栏常驻图标
+    static var showsMenuBarIcon: Bool {
+        get {
+            guard enabled, store.object(forKey: "showsMenuBarIcon") != nil else { return true }
+            return store.bool(forKey: "showsMenuBarIcon")
+        }
+        set {
+            guard enabled else { return }
+            store.set(newValue, forKey: "showsMenuBarIcon")
+        }
+    }
+
+    /// 全局快捷键 ⌥⌘E
+    static var enablesGlobalHotKey: Bool {
+        get {
+            guard enabled, store.object(forKey: "enablesGlobalHotKey") != nil else { return true }
+            return store.bool(forKey: "enablesGlobalHotKey")
+        }
+        set {
+            guard enabled else { return }
+            store.set(newValue, forKey: "enablesGlobalHotKey")
         }
     }
 }

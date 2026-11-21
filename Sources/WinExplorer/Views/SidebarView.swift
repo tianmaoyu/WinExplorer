@@ -12,8 +12,9 @@ struct SidebarView: View {
 
     private let quickPlaces = Place.quickPlaces
     private let volumes = Place.volumes
+    private let networkVolumes = Place.networkVolumes
 
-    /// 已经在收藏夹里的位置不再在「常用 / 设备」里重复出现，
+    /// 已经在收藏夹里的位置不再在「常用 / 设备 / 网络」里重复出现，
     /// 否则同一个 URL 会在侧边栏出现两次、且同时高亮。
     private var plainQuickPlaces: [Place] {
         quickPlaces.filter { !favorites.contains($0.url) }
@@ -21,6 +22,10 @@ struct SidebarView: View {
 
     private var plainVolumes: [Place] {
         volumes.filter { !favorites.contains($0.url) }
+    }
+
+    private var plainNetworkVolumes: [Place] {
+        networkVolumes.filter { !favorites.contains($0.url) }
     }
 
     var body: some View {
@@ -39,15 +44,22 @@ struct SidebarView: View {
                 }
 
                 if !plainQuickPlaces.isEmpty {
-                    Section("常用") {
+                    Section(L("常用", "Places")) {
                         ForEach(plainQuickPlaces) { place in
                             placeRow(place)
                         }
                     }
                 }
                 if !plainVolumes.isEmpty {
-                    Section("设备") {
+                    Section(L("设备", "Devices")) {
                         ForEach(plainVolumes) { place in
+                            placeRow(place)
+                        }
+                    }
+                }
+                if !plainNetworkVolumes.isEmpty {
+                    Section(L("网络", "Network")) {
+                        ForEach(plainNetworkVolumes) { place in
                             placeRow(place)
                         }
                     }
@@ -85,7 +97,7 @@ struct SidebarView: View {
 
     private var favoritesHeader: some View {
         HStack(spacing: 4) {
-            Text("收藏夹")
+            Text(L("收藏夹", "Favorites"))
             Spacer(minLength: 2)
             Button {
                 model.addCurrentDirectoryToFavorites()
@@ -97,7 +109,7 @@ struct SidebarView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(favoritesTargeted ? Color.accentColor : Color.secondary)
-            .help("把当前文件夹加入收藏夹")
+            .help(L("把当前文件夹加入收藏夹", "Add the current folder to favorites"))
         }
         .padding(.vertical, 1)
         .padding(.trailing, 4)
@@ -111,7 +123,8 @@ struct SidebarView: View {
     }
 
     private var favoritesHint: some View {
-        Text("把文件夹拖到这里，或点 + 收藏当前文件夹")
+        Text(L("把文件夹拖到这里，或点 + 收藏当前文件夹",
+               "Drag folders here, or click + to save the current folder"))
             .font(.system(size: 10.5))
             .foregroundStyle(favoritesTargeted ? Color.accentColor : Color.secondary)
             .lineLimit(2)
@@ -125,11 +138,11 @@ struct SidebarView: View {
     private func favoriteRow(_ place: Place) -> some View {
         placeRow(place)
             .contextMenu {
-                Button("在 Finder 中显示") {
+                Button(L("在 Finder 中显示", "Show in Finder")) {
                     NSWorkspace.shared.activateFileViewerSelecting([place.url])
                 }
                 Divider()
-                Button("从收藏夹移除") {
+                Button(L("从收藏夹移除", "Remove from Favorites")) {
                     favorites.remove(place.url)
                 }
             }
@@ -144,14 +157,16 @@ struct SidebarView: View {
                     && isDirectory.boolValue
             }
             guard !folders.isEmpty else {
-                model.showFlash("只能把文件夹加入收藏夹")
+                model.showFlash(L("只能把文件夹加入收藏夹", "Only folders can be added to Favorites"))
                 return
             }
             var added = 0
             for folder in folders where favorites.add(folder) {
                 added += 1
             }
-            model.showFlash(added > 0 ? "已收藏 \(added) 个文件夹" : "这些文件夹已经在收藏夹里")
+            model.showFlash(added > 0
+                ? L("已收藏 \(added) 个文件夹", "Added \(added) folder(s) to Favorites")
+                : L("这些文件夹已经在收藏夹里", "Those folders are already in Favorites"))
         }
         return true
     }

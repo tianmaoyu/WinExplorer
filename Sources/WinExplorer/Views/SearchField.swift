@@ -7,7 +7,7 @@ struct SearchField: NSViewRepresentable {
     var text: String
     /// 变成新的 UUID 时把焦点抢到搜索框并全选（⌘F）
     var focusToken: UUID?
-    var placeholder: String = "搜索"
+    var placeholder: String = L("搜索", "Search")
     var onChange: (String) -> Void
     var onSubmit: () -> Void
     var onCancel: () -> Void

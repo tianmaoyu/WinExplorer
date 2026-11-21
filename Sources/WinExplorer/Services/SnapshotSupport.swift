@@ -100,6 +100,16 @@ enum SnapshotSupport {
                         }
                         return
                     }
+                    if key == "about" {
+                        // 打开关于面板，用于截图验收
+                        active.showAbout()
+                        return
+                    }
+                    if key.hasPrefix("sizes:") {
+                        // sizes:on / sizes:off，切换文件夹大小统计
+                        active.showsFolderSizes = key.hasSuffix("on")
+                        return
+                    }
                     if key.hasPrefix("archive:") {
                         // archive:zip / archive:unzip，验证压缩与解压（作用于当前选区）
                         switch String(key.dropFirst("archive:".count)) {

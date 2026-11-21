@@ -61,7 +61,7 @@ enum TransferService {
 
         var errorDescription: String? {
             switch self {
-            case .cancelled: return "已取消"
+            case .cancelled: return L("已取消", "Cancelled")
             }
         }
     }
@@ -94,7 +94,7 @@ enum TransferService {
 
         var index = 1
         while index < 1000 {
-            let suffix = index == 1 ? " 副本" : " 副本 \(index)"
+            let suffix = index == 1 ? L(" 副本", " copy") : L(" 副本 \(index)", " copy \(index)")
             let candidate = ext.isEmpty
                 ? safeBase + suffix
                 : safeBase + suffix + "." + ext
@@ -103,8 +103,8 @@ enum TransferService {
             index += 1
         }
         return directory.appendingPathComponent(
-            ext.isEmpty ? "\(safeBase) 副本 \(UUID().uuidString.prefix(4))"
-                        : "\(safeBase) 副本 \(UUID().uuidString.prefix(4)).\(ext)"
+            ext.isEmpty ? "\(safeBase)\(L(" 副本", " copy")) \(UUID().uuidString.prefix(4))"
+                        : "\(safeBase)\(L(" 副本", " copy")) \(UUID().uuidString.prefix(4)).\(ext)"
         )
     }
 

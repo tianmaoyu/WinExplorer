@@ -52,7 +52,7 @@ enum SelfTest {
               Array(model.items.map(\.name).suffix(2)) == ["big.bin", "small.txt"],
               "实际 \(model.items.map(\.name))")
         check("文件夹不显示大小", model.items.prefix(2).allSatisfy { $0.sizeText == "—" })
-        check("文件类型不是文件夹", model.items.first { $0.name == "small.txt" }?.kind != "文件夹")
+        check("文件类型不是文件夹", model.items.first { $0.name == "small.txt" }?.kind != L("文件夹", "Folder"))
 
         model.showHidden = true
         check("显示隐藏文件", model.items.contains { $0.name == ".secret" })
@@ -137,12 +137,12 @@ enum SelfTest {
 
         // MARK: 新建与错误
         model.createFolder()
-        check("新建文件夹", fm.fileExists(atPath: root.appendingPathComponent("新建文件夹").path))
+        check("新建文件夹", fm.fileExists(atPath: root.appendingPathComponent(L("新建文件夹", "New Folder")).path))
         model.createFolder()
-        check("重名自动编号", fm.fileExists(atPath: root.appendingPathComponent("新建文件夹 2").path))
+        check("重名自动编号", fm.fileExists(atPath: root.appendingPathComponent("\(L("新建文件夹", "New Folder")) 2").path))
         check("新建后选中并聚焦",
               model.selection.count == 1
-                && model.focusedURL?.lastPathComponent == "新建文件夹 2",
+                && model.focusedURL?.lastPathComponent == "\(L("新建文件夹", "New Folder")) 2",
               "选中 \(model.selection.count) 项，焦点 \(model.focusedURL?.lastPathComponent ?? "nil")")
 
         // MARK: 重命名与删除（全部限制在临时目录内，不碰任何用户文件）
@@ -228,7 +228,7 @@ enum SelfTest {
             model.copySelection()
             check("复制后可以粘贴", model.canPaste && model.clipboard?.mode == .copy)
             model.paste()
-            let duplicated = clipSrc.appendingPathComponent("甲 副本.txt")
+            let duplicated = clipSrc.appendingPathComponent("\(L("甲", "甲"))\(L(" 副本", " copy")).txt")
             check("同目录粘贴生成「副本」", fm.fileExists(atPath: duplicated.path))
             check("副本内容一致", text(duplicated) == "A", "实际 \(text(duplicated))")
             check("复制后剪贴板仍保留", model.clipboard?.mode == .copy)
@@ -239,7 +239,7 @@ enum SelfTest {
                   "选中 \(model.selection.map(\.lastPathComponent))")
 
             model.paste()
-            let second = clipSrc.appendingPathComponent("甲 副本 2.txt")
+            let second = clipSrc.appendingPathComponent("甲\(L(" 副本", " copy")) 2.txt")
             check("再次粘贴编号递增", fm.fileExists(atPath: second.path))
         } else {
             check("同目录粘贴生成「副本」", false, "找不到甲.txt")
@@ -250,7 +250,7 @@ enum SelfTest {
             model.focus(url: dir.url)
             model.copySelection()
             model.paste()
-            let copiedDir = clipSrc.appendingPathComponent("子目录 副本")
+            let copiedDir = clipSrc.appendingPathComponent("子目录\(L(" 副本", " copy"))")
             check("复制文件夹", fm.fileExists(atPath: copiedDir.path, isDirectory: nil))
             check("文件夹内容一并复制",
                   text(copiedDir.appendingPathComponent("乙.txt")) == "B")
@@ -267,8 +267,8 @@ enum SelfTest {
             model.copySelection()
             model.paste()
             check("多选粘贴各自生成副本",
-                  fm.fileExists(atPath: clipSrc.appendingPathComponent("甲 副本 3.txt").path)
-                    && fm.fileExists(atPath: clipSrc.appendingPathComponent("丙 副本.txt").path))
+                  fm.fileExists(atPath: clipSrc.appendingPathComponent("甲\(L(" 副本", " copy")) 3.txt").path)
+                    && fm.fileExists(atPath: clipSrc.appendingPathComponent("丙\(L(" 副本", " copy")).txt").path))
         }
 
         // 剪切 + 换目录粘贴 → 真正移动
@@ -329,7 +329,7 @@ enum SelfTest {
             model.paste(into: selfTarget)
             check("禁止把文件夹粘贴进自己", model.errorMessage != nil)
             check("禁止粘贴时不产生内容",
-                  !fm.fileExists(atPath: selfTarget.appendingPathComponent("子目录 副本").path))
+                  !fm.fileExists(atPath: selfTarget.appendingPathComponent("子目录\(L(" 副本", " copy"))").path))
             model.dismissError()
         } else {
             check("禁止把文件夹粘贴进自己", false, "找不到子目录")
@@ -357,7 +357,7 @@ enum SelfTest {
             check("重命名后新名字存在",
                   fm.fileExists(atPath: undoSrc.appendingPathComponent("定稿.txt").path))
             check("重命名进入撤销栈",
-                  model.canUndo && (model.undoTitle?.contains("重命名") ?? false),
+                  model.canUndo && (model.undoTitle?.lowercased().contains(L("重命名", "rename").lowercased()) ?? false),
                   "undoTitle=\(model.undoTitle ?? "nil")")
 
             model.undo()
@@ -374,7 +374,7 @@ enum SelfTest {
 
         // 新建文件夹 → 撤销 → 重做
         model.createFolder()
-        let createdFolder = undoSrc.appendingPathComponent("新建文件夹")
+        let createdFolder = undoSrc.appendingPathComponent(L("新建文件夹", "New Folder"))
         check("新建文件夹进入撤销栈", model.canUndo && fm.fileExists(atPath: createdFolder.path))
         model.undo()
         check("撤销新建文件夹", !fm.fileExists(atPath: createdFolder.path))
@@ -388,7 +388,7 @@ enum SelfTest {
             model.focus(url: source.url)
             model.copySelection()
             model.paste()
-            let copyURL = undoSrc.appendingPathComponent("定稿 副本.txt")
+            let copyURL = undoSrc.appendingPathComponent("定稿\(L(" 副本", " copy")).txt")
             check("复制生成副本", fm.fileExists(atPath: copyURL.path))
 
             model.undo()
@@ -426,7 +426,7 @@ enum SelfTest {
             check("撤销后重做栈可用", model.canRedo)
             model.createFolder()
             check("新操作清空重做栈", !model.canRedo)
-            if let extra = model.items.first(where: { $0.name == "新建文件夹" }) {
+            if let extra = model.items.first(where: { $0.name == L("新建文件夹", "New Folder") }) {
                 try? fm.removeItem(at: extra.url)
             }
         }
@@ -682,13 +682,13 @@ enum SelfTest {
                 && model.info?.fields.contains { $0.id == "size" && $0.value != "计算中…" } == true,
               "实际 note=\(model.info?.note ?? "nil")")
         check("文件夹属性显示包含项",
-              model.info?.fields.contains { $0.id == "items" && $0.value.contains("1 个文件") } == true,
+              model.info?.fields.contains { $0.id == "items" && $0.value.contains(L("1 个文件", "1 file")) } == true,
               "实际 \(model.info?.fields.first { $0.id == "items" }?.value ?? "nil")")
         model.closeInfo()
 
         model.selectAll()
         model.showInfo()
-        check("多选属性显示项目数", model.info?.title == "4 个项目", "实际 \(model.info?.title ?? "nil")")
+        check("多选属性显示项目数", model.info?.title == L("4 个项目", "4 items"), "实际 \(model.info?.title ?? "nil")")
         check("多选属性汇总大小",
               model.info?.fields.first { $0.id == "size" }?.value != "计算中…")
         model.closeInfo()
@@ -808,7 +808,7 @@ enum SelfTest {
                   Array(conflictPlan?.rows.map(\.newName).prefix(2) ?? []) == ["旅行 01.jpg", "旅行 02.jpg"],
                   "实际 \(conflictPlan?.rows.map(\.newName) ?? [])")
             check("与磁盘已有文件重名会被拦下",
-                  conflictPlan?.rows.first?.problem == "已存在同名项目",
+                  conflictPlan?.rows.first?.problem == L("已存在同名项目", "A file with this name already exists"),
                   "实际 \(conflictPlan?.rows.first?.problem ?? "nil")")
             check("有冲突时不可执行", conflictPlan?.isApplicable == false)
 
@@ -834,7 +834,7 @@ enum SelfTest {
                   })
             check("执行后面板关闭", model.batchRename == nil)
             check("批量重命名进入撤销栈",
-                  model.canUndo && (model.undoTitle?.contains("批量重命名") ?? false),
+                  model.canUndo && (model.undoTitle?.lowercased().contains(L("批量重命名", "batch rename").lowercased()) ?? false),
                   "undoTitle=\(model.undoTitle ?? "nil")")
             check("重命名后选中新项目",
                   model.selection.contains { $0.lastPathComponent == "假期 01.jpg" },
@@ -1015,6 +1015,81 @@ enum SelfTest {
         check("预览 ↑ 回到最后一项", quickLook.index == 1, "实际 \(quickLook.index)")
         quickLook.onFocus = nil
         quickLook.prepare(urls: [], startAt: nil)
+
+        // MARK: 文件夹大小（1.0.0）
+
+        let sizeRoot = root.appendingPathComponent("大小测试")
+        let sizeA = sizeRoot.appendingPathComponent("甲目录")
+        let sizeB = sizeRoot.appendingPathComponent("乙目录")
+        try? fm.createDirectory(at: sizeA.appendingPathComponent("内层"), withIntermediateDirectories: true)
+        try? fm.createDirectory(at: sizeB, withIntermediateDirectories: true)
+        fm.createFile(atPath: sizeA.appendingPathComponent("x.bin").path,
+                      contents: Data(repeating: 0, count: 1000))
+        fm.createFile(atPath: sizeA.appendingPathComponent("内层/y.bin").path,
+                      contents: Data(repeating: 0, count: 2000))
+        fm.createFile(atPath: sizeB.appendingPathComponent("z.bin").path,
+                      contents: Data(repeating: 0, count: 500))
+        fm.createFile(atPath: sizeRoot.appendingPathComponent("顶.txt").path,
+                      contents: Data(repeating: 0, count: 42))
+
+        model.navigate(to: sizeRoot)
+        check("默认不显示文件夹大小",
+              model.items.first?.isDirectory == true
+                && model.items.first.map { model.sizeText(for: $0) } == "—")
+        check("没开统计时没有进度", model.folderSizeProgress == nil)
+
+        model.showsFolderSizes = true
+        if let folderA = model.items.first(where: { $0.name == "甲目录" }) {
+            check("文件夹大小统计完成（递归）",
+                  model.sizeText(for: folderA) == FileItem.byteText(3000),
+                  "实际 \(model.sizeText(for: folderA))")
+        } else {
+            check("文件夹大小统计完成（递归）", false, "找不到甲目录")
+        }
+        if let folderB = model.items.first(where: { $0.name == "乙目录" }) {
+            check("另一个文件夹大小正确",
+                  model.sizeText(for: folderB) == FileItem.byteText(500),
+                  "实际 \(model.sizeText(for: folderB))")
+        }
+        check("统计完成后没有进度", model.folderSizeProgress == nil)
+        check("大小结果进入缓存", FolderSizeService.shared.cached(sizeA)?.bytes == 3000,
+              "实际 \(FolderSizeService.shared.cached(sizeA)?.bytes ?? -1)")
+        if let file = model.items.first(where: { $0.name == "顶.txt" }) {
+            check("文件行仍按真实大小", model.sizeText(for: file) == FileItem.byteText(42),
+                  "实际 \(model.sizeText(for: file))")
+        } else {
+            check("文件行仍按真实大小", false, "找不到顶.txt")
+        }
+        model.showsFolderSizes = false
+        check("关掉后大小回到 —",
+              model.items.first.map { model.sizeText(for: $0) } == "—")
+
+        // MARK: 位置与系统集成（1.0.0）
+
+        let cloudDocs = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs")
+        if fm.fileExists(atPath: cloudDocs.path) {
+            check("常用位置包含 iCloud 云盘",
+                  Place.quickPlaces.contains {
+                      $0.url.standardizedFileURL.path == cloudDocs.standardizedFileURL.path
+                  },
+                  "实际 \(Place.quickPlaces.map(\.name))")
+        } else {
+            check("没有 iCloud 时不会凭空加一项",
+                  !Place.quickPlaces.contains {
+                      $0.url.path.contains("com~apple~CloudDocs")
+                  })
+        }
+        check("本机卷都在「设备」里", Place.volumes.allSatisfy(\.isLocal))
+        check("网络卷都在「网络」里", Place.networkVolumes.allSatisfy { !$0.isLocal })
+        check("全局快捷键文案", GlobalHotKey.shortcutText == "⌥⌘E")
+
+        model.showAbout()
+        check("关于面板打开", model.showsAbout && model.hasModalOverlay)
+        model.closeAbout()
+        check("关于面板关闭", !model.showsAbout && model.batchRename == nil)
+
+        check("本地化按当前语言取文案", L("甲", "A") == (L10n.isEnglish ? "A" : "甲"))
 
         let before = model.currentURL
         model.navigate(to: root.appendingPathComponent("no-such-dir"))

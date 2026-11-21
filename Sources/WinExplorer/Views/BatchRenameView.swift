@@ -78,9 +78,9 @@ struct BatchRenameView: View {
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("批量重命名")
+                Text(L("批量重命名", "Batch Rename"))
                     .font(.system(size: 13, weight: .semibold))
-                Text("已选 \(state.items.count) 个项目，按列表顺序编号")
+                Text(L("已选 \(state.items.count) 个项目，按列表顺序编号", "\(state.items.count) items selected, numbered in list order"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -97,7 +97,7 @@ struct BatchRenameView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .help("关闭（Esc）")
+            .help(L("关闭（Esc）", "Close (Esc)"))
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 13)
@@ -125,7 +125,7 @@ struct BatchRenameView: View {
                 replaceControls
             }
 
-            Toggle("保留扩展名", isOn: boolBinding(\.keepExtension))
+            Toggle(L("保留扩展名", "Keep extension"), isOn: boolBinding(\.keepExtension))
                 .toggleStyle(.checkbox)
                 .font(.system(size: 11.5))
         }
@@ -134,13 +134,13 @@ struct BatchRenameView: View {
     private var sequenceControls: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                fieldLabel("基名")
-                TextField("例如：旅行照片", text: stringBinding(\.baseName))
+                fieldLabel(L("基名", "Base name"))
+                TextField(L("例如：旅行照片", "e.g. Vacation"), text: stringBinding(\.baseName))
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 190)
                     .focused($focused, equals: .base)
 
-                fieldLabel("起始序号")
+                fieldLabel(L("起始序号", "Start at"))
                 TextField("1", value: intBinding(\.startIndex, 0...9999), format: .number)
                     .textFieldStyle(.roundedBorder)
                     .multilineTextAlignment(.trailing)
@@ -148,22 +148,22 @@ struct BatchRenameView: View {
             }
 
             HStack(spacing: 10) {
-                fieldLabel("分隔符")
+                fieldLabel(L("分隔符", "Separator"))
                 Picker("", selection: stringBinding(\.separator)) {
-                    Text("空格").tag(" ")
-                    Text("下划线").tag("_")
-                    Text("连字符").tag("-")
-                    Text("无").tag("")
+                    Text(L("空格", "Space")).tag(" ")
+                    Text(L("下划线", "Underscore")).tag("_")
+                    Text(L("连字符", "Hyphen")).tag("-")
+                    Text(L("无", "None")).tag("")
                 }
                 .labelsHidden()
                 .frame(width: 96)
 
-                fieldLabel("序号位数")
+                fieldLabel(L("序号位数", "Digits"))
                 Picker("", selection: intBinding(\.digits, 0...4)) {
-                    Text("不补零").tag(0)
-                    Text("2 位").tag(2)
-                    Text("3 位").tag(3)
-                    Text("4 位").tag(4)
+                    Text(L("不补零", "No padding")).tag(0)
+                    Text(L("2 位", "2 digits")).tag(2)
+                    Text(L("3 位", "3 digits")).tag(3)
+                    Text(L("4 位", "4 digits")).tag(4)
                 }
                 .labelsHidden()
                 .frame(width: 96)
@@ -174,20 +174,20 @@ struct BatchRenameView: View {
     private var replaceControls: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                fieldLabel("查找")
-                TextField("要替换的文字", text: stringBinding(\.findText))
+                fieldLabel(L("查找", "Find"))
+                TextField(L("要替换的文字", "Text to replace"), text: stringBinding(\.findText))
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 190)
                     .focused($focused, equals: .find)
 
-                fieldLabel("替换为")
-                TextField("留空即删除", text: stringBinding(\.replaceText))
+                fieldLabel(L("替换为", "Replace with"))
+                TextField(L("留空即删除", "Leave empty to delete"), text: stringBinding(\.replaceText))
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 190)
                     .focused($focused, equals: .replace)
             }
 
-            Toggle("区分大小写", isOn: boolBinding(\.caseSensitive))
+            Toggle(L("区分大小写", "Case sensitive"), isOn: boolBinding(\.caseSensitive))
                 .toggleStyle(.checkbox)
                 .font(.system(size: 11.5))
         }
@@ -204,12 +204,12 @@ struct BatchRenameView: View {
     private var preview: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Text("预览")
+                Text(L("预览", "Preview"))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.secondary)
                 Spacer()
                 if plan.changedCount > 0 {
-                    Text("\(plan.changedCount) 项将被改名")
+                    Text(L("\(plan.changedCount) 项将被改名", "\(plan.changedCount) items will be renamed"))
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -245,7 +245,7 @@ struct BatchRenameView: View {
                                     .foregroundStyle(.red)
                                     .lineLimit(1)
                             } else if !row.isChanged {
-                                Text("不变")
+                                Text(L("不变", "unchanged"))
                                     .font(.system(size: 10.5))
                                     .foregroundStyle(.tertiary)
                             }
@@ -272,10 +272,10 @@ struct BatchRenameView: View {
 
             Spacer(minLength: 8)
 
-            Button("取消") { model.cancelBatchRename() }
+            Button(L("取消", "Cancel")) { model.cancelBatchRename() }
                 .keyboardShortcut(.cancelAction)
 
-            Button("开始重命名") { model.applyBatchRename() }
+            Button(L("开始重命名", "Rename")) { model.applyBatchRename() }
                 .buttonStyle(.borderedProminent)
                 .disabled(!plan.isApplicable)
         }
@@ -285,9 +285,11 @@ struct BatchRenameView: View {
 
     private var statusText: String {
         if let problem = plan.problems.first { return problem }
-        if plan.rows.contains(where: { $0.problem != nil }) { return "有项目存在冲突，修正后才能执行" }
-        if plan.changes.isEmpty { return "名称没有变化" }
-        return "将重命名 \(plan.changedCount) 项，可用 ⌘Z 整体撤销"
+        if plan.rows.contains(where: { $0.problem != nil }) {
+            return L("有项目存在冲突，修正后才能执行", "Fix the conflicts before renaming")
+        }
+        if plan.changes.isEmpty { return L("名称没有变化", "Names would not change") }
+        return L("将重命名 \(plan.changedCount) 项，可用 ⌘Z 整体撤销", "\(plan.changedCount) items will be renamed — ⌘Z undoes the whole batch")
     }
 
     // MARK: - 绑定

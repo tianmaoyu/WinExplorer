@@ -30,7 +30,7 @@ struct TabBarView: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .help("新建标签页（⌘T）")
+            .help(L("新建标签页（⌘T）", "New Tab (⌘T)"))
             .padding(.trailing, 8)
         }
         .frame(height: Self.height)
@@ -96,7 +96,7 @@ private struct TabChip: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
-                .help("关闭标签页（⌘W）")
+                .help(L("关闭标签页（⌘W）", "Close Tab (⌘W)"))
             }
         }
         .padding(.horizontal, 8)

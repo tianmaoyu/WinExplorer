@@ -13,6 +13,16 @@ struct StatusBar: View {
                 summary
             }
 
+            if let progress = model.folderSizeProgress {
+                Text("·")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                Text(L("正在统计文件夹大小 \(progress.done)/\(progress.total)",
+                       "Calculating folder sizes \(progress.done)/\(progress.total)"))
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.tertiary)
+            }
+
             Spacer(minLength: 12)
 
             Text(model.currentURL.path)
@@ -29,17 +39,17 @@ struct StatusBar: View {
     @ViewBuilder
     private var summary: some View {
         if model.selection.count > 1 {
-            Text("已选 \(model.selection.count) 项")
+            Text(L("已选 \(model.selection.count) 项", "\(model.selection.count) selected"))
                 .font(.system(size: 11))
                 .foregroundStyle(Color.accentColor)
             Text("·")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
-            Text("共 \(byteText(model.selectedTotalSize))")
+            Text(L("共 \(byteText(model.selectedTotalSize))", "\(byteText(model.selectedTotalSize)) total"))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
             if model.selectedItems.contains(where: \.isDirectory) {
-                Text("（不含文件夹大小）")
+                Text(L("（不含文件夹大小）", "(folders not counted)"))
                     .font(.system(size: 10.5))
                     .foregroundStyle(.tertiary)
             }
@@ -56,16 +66,16 @@ struct StatusBar: View {
             }
         } else {
             if model.isSearching {
-                Text("搜索「\(model.searchQuery)」")
+                Text(L("搜索「\(model.searchQuery)」", "Search “\(model.searchQuery)”"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text("· \(model.items.count) 项匹配")
+                Text(L("· \(model.items.count) 项匹配", "· \(model.items.count) matches"))
                     .font(.system(size: 11))
                     .foregroundStyle(model.items.isEmpty ? Color.secondary : Color.accentColor)
             } else {
-                Text("\(model.items.count) 个项目")
+                Text(L("\(model.items.count) 个项目", "\(model.items.count) items"))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }

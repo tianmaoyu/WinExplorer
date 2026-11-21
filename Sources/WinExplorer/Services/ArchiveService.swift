@@ -53,17 +53,18 @@ enum ArchiveService {
         var errorDescription: String? {
             switch self {
             case .cancelled:
-                return "已取消"
+                return L("已取消", "Cancelled")
             case .tool(let message):
                 return message
             case .unsupported(let name):
-                return "「\(name)」不是 zip 压缩包"
+                return L("「\(name)」不是 zip 压缩包", "“\(name)” is not a ZIP archive")
             case .invalid(let message):
                 return message
             case .conflicts(let names):
                 let list = names.prefix(3).joined(separator: "、")
-                    + (names.count > 3 ? " 等" : "")
-                return "目标位置已存在同名项目：\(list)，未解压（可改用「解压到同名文件夹」）"
+                    + (names.count > 3 ? L(" 等", " and more") : "")
+                return L("目标位置已存在同名项目：\(list)，未解压（可改用「解压到同名文件夹」）",
+                         "These names already exist: \(list). Nothing was extracted — try “Extract to Folder” instead.")
             }
         }
     }
@@ -83,7 +84,7 @@ enum ArchiveService {
             base = stem.isEmpty ? name : stem
         } else {
             let folder = directory.lastPathComponent
-            base = folder.isEmpty ? "归档" : folder
+            base = folder.isEmpty ? L("归档", "Archive") : folder
         }
         return unique(directory.appendingPathComponent(base + ".zip"))
     }
@@ -121,7 +122,7 @@ enum ArchiveService {
 
     /// 把一批项目压缩成 destination（调用线程同步执行）
     static func compress(items: [URL], to destination: URL, task: ArchiveTask) throws {
-        guard !items.isEmpty else { throw Failure.invalid("没有要压缩的项目") }
+        guard !items.isEmpty else { throw Failure.invalid(L("没有要压缩的项目", "Nothing to compress")) }
 
         var arguments: [String]
         var workingDirectory: URL?
@@ -137,7 +138,7 @@ enum ArchiveService {
         } else {
             // zip 需要在父目录里用相对路径打包，否则会把绝对路径写进压缩包
             guard let parent = commonParent(of: items) else {
-                throw Failure.invalid("这些项目不在同一个文件夹里，无法一起压缩")
+                throw Failure.invalid(L("这些项目不在同一个文件夹里，无法一起压缩", "These items are not in the same folder, so they can’t be compressed together"))
             }
             workingDirectory = parent
             let relatives = items.map { relativePath(of: $0, from: parent) }
@@ -163,7 +164,7 @@ enum ArchiveService {
     static func extract(archive: URL, to directory: URL, task: ArchiveTask) throws {
         guard isArchive(archive) else { throw Failure.unsupported(archive.lastPathComponent) }
         guard FileManager.default.fileExists(atPath: archive.path) else {
-            throw Failure.invalid("「\(archive.lastPathComponent)」已经不在了")
+            throw Failure.invalid(L("「\(archive.lastPathComponent)」已经不在了", "“\(archive.lastPathComponent)” is gone"))
         }
 
         let fm = FileManager.default
@@ -256,7 +257,7 @@ enum ArchiveService {
             try process.run()
         } catch {
             task.detach()
-            throw Failure.tool("无法启动系统压缩工具：\(error.localizedDescription)")
+            throw Failure.tool(L("无法启动系统压缩工具：\(error.localizedDescription)", "Couldn’t start the system archiver: \(error.localizedDescription)"))
         }
         process.waitUntilExit()
         task.detach()
@@ -268,7 +269,7 @@ enum ArchiveService {
             let raw = String(data: data, encoding: .utf8) ?? ""
             let message = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             throw Failure.tool(message.isEmpty
-                               ? "压缩工具退出码 \(process.terminationStatus)"
+                               ? L("压缩工具退出码 \(process.terminationStatus)", "The archiver exited with code \(process.terminationStatus)")
                                : message)
         }
     }

@@ -73,6 +73,17 @@ final class BrowserModel: ObservableObject {
     /// 属性面板的内容（nil 表示关闭）
     @Published private(set) var info: InfoSheetState?
 
+    /// 关于面板
+    @Published var showsAbout = false
+
+    func showAbout() {
+        showsAbout = true
+    }
+
+    func closeAbout() {
+        showsAbout = false
+    }
+
     /// 视图模式
     @Published var viewMode: ViewMode = Preferences.viewMode {
         didSet {
@@ -115,24 +126,24 @@ final class BrowserModel: ObservableObject {
 
     func undo() {
         guard let entry = undoStack.popLast() else {
-            showFlash("没有可撤销的操作")
+            showFlash("Nothing to undo")
             return
         }
         entry.undo()
         redoStack.append(entry)
         reload()
-        showFlash("已撤销：\(entry.title)")
+        showFlash(L("已撤销：\(entry.title)", "Undone: \(entry.title)"))
     }
 
     func redo() {
         guard let entry = redoStack.popLast() else {
-            showFlash("没有可重做的操作")
+            showFlash("Nothing to redo")
             return
         }
         entry.redo()
         undoStack.append(entry)
         reload()
-        showFlash("已重做：\(entry.title)")
+        showFlash(L("已重做：\(entry.title)", "Redone: \(entry.title)"))
     }
 
     /// 为一批移动/复制生成撤销项：移动就搬回去，复制就把副本删掉
@@ -140,13 +151,13 @@ final class BrowserModel: ObservableObject {
         let copyCount = requests.filter { $0.mode == .copy }.count
         let verb: String
         if copyCount == requests.count {
-            verb = "复制"
+            verb = L("复制", "copy")
         } else if copyCount == 0 {
-            verb = "移动"
+            verb = L("移动", "move")
         } else {
-            verb = "移动/复制"
+            verb = L("移动/复制", "move/copy")
         }
-        let title = "\(verb) \(requests.count) 项到「\(targetName)」"
+        let title = L("\(verb) \(requests.count) 项到「\(targetName)」", "\(verb) \(requests.count) item(s) to “\(targetName)”")
 
         return UndoEntry(
             title: title,
@@ -163,7 +174,7 @@ final class BrowserModel: ObservableObject {
                                 try fm.moveItem(at: request.destination, to: request.source)
                                 reverted += 1
                             } catch {
-                                self.errorMessage = "撤销移动失败：\(error.localizedDescription)"
+                                self.errorMessage = L("撤销移动失败：\(error.localizedDescription)", "Couldn’t undo the move: \(error.localizedDescription)")
                             }
                         }
                     case .copy:
@@ -172,12 +183,12 @@ final class BrowserModel: ObservableObject {
                                 try fm.removeItem(at: request.destination)
                                 reverted += 1
                             } catch {
-                                self.errorMessage = "撤销复制失败：\(error.localizedDescription)"
+                                self.errorMessage = L("撤销复制失败：\(error.localizedDescription)", "Couldn’t undo the copy: \(error.localizedDescription)")
                             }
                         }
                     }
                 }
-                if reverted == 0 { self.errorMessage = "撤销失败：这些项目已经不在原位置了" }
+                if reverted == 0 { self.errorMessage = L("撤销失败：这些项目已经不在原位置了", "Undo failed: those items are no longer in their original location") }
             },
             redo: { [weak self] in
                 guard let self else { return }
@@ -190,7 +201,7 @@ final class BrowserModel: ObservableObject {
                             do {
                                 try fm.moveItem(at: request.source, to: request.destination)
                             } catch {
-                                self.errorMessage = "重做移动失败：\(error.localizedDescription)"
+                                self.errorMessage = L("重做移动失败：\(error.localizedDescription)", "Couldn’t redo the move: \(error.localizedDescription)")
                             }
                         }
                     case .copy:
@@ -198,7 +209,7 @@ final class BrowserModel: ObservableObject {
                             do {
                                 try fm.copyItem(at: request.source, to: request.destination)
                             } catch {
-                                self.errorMessage = "重做复制失败：\(error.localizedDescription)"
+                                self.errorMessage = L("重做复制失败：\(error.localizedDescription)", "Couldn’t redo the copy: \(error.localizedDescription)")
                             }
                         }
                     }
@@ -225,6 +236,19 @@ final class BrowserModel: ObservableObject {
             applySortAndFilter()
         }
     }
+
+    /// 是否在列表里显示文件夹大小（异步统计，默认关闭）
+    @Published var showsFolderSizes: Bool = Preferences.showsFolderSizes {
+        didSet {
+            guard showsFolderSizes != oldValue else { return }
+            Preferences.showsFolderSizes = showsFolderSizes
+            refreshFolderSizes()
+        }
+    }
+
+    /// 已经算出来的文件夹大小（path → 大小）
+    @Published private(set) var folderSizes: [String: FolderSizeService.Size] = [:]
+    private var folderSizeJob: FolderSizeJob?
 
     @Published private(set) var backStack: [URL] = []
     @Published private(set) var forwardStack: [URL] = []
@@ -343,6 +367,25 @@ final class BrowserModel: ObservableObject {
         }
     }
 
+    /// 一行的「大小」列文字：文件直接给大小，文件夹按需异步统计
+    func sizeText(for item: FileItem) -> String {
+        guard item.isDirectory else { return item.sizeText }
+        guard showsFolderSizes else { return "—" }
+        guard let size = folderSizes[item.url.standardizedFileURL.path] else { return "…" }
+        let text = FileItem.byteText(size.bytes)
+        return size.truncated ? "≥ " + text : text
+    }
+
+    /// 文件夹大小的统计进度（0…1，没有在算时返回 nil），状态栏用
+    var folderSizeProgress: (done: Int, total: Int)? {
+        guard showsFolderSizes else { return nil }
+        let folders = items.filter(\.isDirectory)
+        guard !folders.isEmpty else { return nil }
+        let done = folders.filter { folderSizes[$0.url.standardizedFileURL.path] != nil }.count
+        guard done < folders.count else { return nil }
+        return (done, folders.count)
+    }
+
     var crumbs: [Crumb] {
         var result: [Crumb] = []
         let root = URL(fileURLWithPath: "/")
@@ -437,7 +480,7 @@ final class BrowserModel: ObservableObject {
 
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: candidate.path, isDirectory: &isDirectory) else {
-            pathError = "找不到「\(trimmed)」"
+            pathError = L("找不到「\(trimmed)」", "Can’t find “\(trimmed)”")
             return false
         }
 
@@ -530,9 +573,10 @@ final class BrowserModel: ObservableObject {
             closeInfo()
             Preferences.lastDirectoryPath = standardized.path
             applySortAndFilter()
+            refreshFolderSizes()
             watchDirectory(standardized)
         } catch {
-            errorMessage = "无法打开「\(url.lastPathComponent)」：\(error.localizedDescription)"
+            errorMessage = L("无法打开「\(url.lastPathComponent)」：\(error.localizedDescription)", "Can’t open “\(url.lastPathComponent)”: \(error.localizedDescription)")
         }
     }
 
@@ -554,6 +598,57 @@ final class BrowserModel: ObservableObject {
         }
         if let anchor = anchorURL, !visibleURLs.contains(anchor) {
             anchorURL = nil
+        }
+    }
+
+    // MARK: - 文件夹大小
+
+    /// 重排统计任务：缓存直接命中，没算过的丢给后台队列（最多一次 200 个目录）
+    private func refreshFolderSizes() {
+        folderSizeJob?.cancel()
+        let job = FolderSizeJob()
+        folderSizeJob = job
+
+        guard showsFolderSizes else {
+            folderSizes = [:]
+            return
+        }
+
+        let folders = items.filter(\.isDirectory)
+        guard !folders.isEmpty else {
+            folderSizes = [:]
+            return
+        }
+
+        var known: [String: FolderSizeService.Size] = [:]
+        var pending: [URL] = []
+        for folder in folders {
+            let key = folder.url.standardizedFileURL.path
+            if let cached = FolderSizeService.shared.cached(folder.url) {
+                known[key] = cached
+            } else if pending.count < 200 {
+                pending.append(folder.url)
+            }
+        }
+        folderSizes = known
+        guard !pending.isEmpty else { return }
+
+        // 自检模式同步算完，方便断言
+        if Self.computesFolderSizeSynchronously {
+            var result = known
+            for url in pending {
+                let size = FolderSizeService.measure(url)
+                FolderSizeService.shared.store(size, for: url)
+                result[url.standardizedFileURL.path] = size
+            }
+            folderSizes = result
+            return
+        }
+
+        FolderSizeService.shared.compute(pending, job: job) { [weak self] url, size in
+            guard let self, !job.isCancelled else { return }
+            FolderSizeService.shared.store(size, for: url)
+            self.folderSizes[url.standardizedFileURL.path] = size
         }
     }
 
@@ -592,9 +687,10 @@ final class BrowserModel: ObservableObject {
             directorySignature = signature
             allItems = loaded
             applySortAndFilter()
+            refreshFolderSizes()
         } catch {
             if errorMessage == nil {
-                errorMessage = "「\(currentURL.lastPathComponent)」已不可访问：\(error.localizedDescription)"
+                errorMessage = L("「\(currentURL.lastPathComponent)」已不可访问：\(error.localizedDescription)", "“\(currentURL.lastPathComponent)” is no longer accessible: \(error.localizedDescription)")
             }
             directoryWatcher.stop()
         }
@@ -778,8 +874,8 @@ final class BrowserModel: ObservableObject {
             if NSWorkspace.shared.open(item.url) { opened += 1 }
         }
         let folders = targets.filter(\.isFolderLike).count
-        var message = "已打开 \(opened) 个文件"
-        if folders > 0 { message += "，跳过 \(folders) 个文件夹" }
+        var message = L("已打开 \(opened) 个文件", "Opened \(opened) file(s)")
+        if folders > 0 { message += L("，跳过 \(folders) 个文件夹", ", skipped \(folders) folder(s)") }
         showFlash(message)
     }
 
@@ -790,7 +886,7 @@ final class BrowserModel: ObservableObject {
     func copyPath(_ item: FileItem) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(item.url.path, forType: .string)
-        showFlash("已复制路径")
+        showFlash(L("已复制路径", "Path copied"))
     }
 
     /// 复制选中项路径（多选时每行一条）
@@ -799,13 +895,13 @@ final class BrowserModel: ObservableObject {
         guard !paths.isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(paths.joined(separator: "\n"), forType: .string)
-        showFlash(paths.count == 1 ? "已复制路径" : "已复制 \(paths.count) 条路径")
+        showFlash(paths.count == 1 ? L("已复制路径", "Path copied") : L("已复制 \(paths.count) 条路径", "Copied \(paths.count) paths"))
     }
 
     func copyCurrentDirectoryPath() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(currentURL.path, forType: .string)
-        showFlash("已复制当前文件夹路径")
+        showFlash(L("已复制当前文件夹路径", "Folder path copied"))
     }
 
     func revealCurrentDirectory() {
@@ -818,7 +914,7 @@ final class BrowserModel: ObservableObject {
     func toggleQuickLook() {
         let targets = selectedItems
         guard !targets.isEmpty else {
-            showFlash("请先选中要预览的项目")
+            showFlash(L("请先选中要预览的项目", "Select what you want to preview"))
             return
         }
         QuickLookController.shared.onFocus = { [weak self] url in
@@ -834,21 +930,21 @@ final class BrowserModel: ObservableObject {
 
     func addCurrentDirectoryToFavorites() {
         if FavoritesStore.shared.add(currentURL) {
-            showFlash("已把「\(titleText)」加入收藏夹")
+            showFlash(L("已把「\(titleText)」加入收藏夹", "Added “\(titleText)” to Favorites"))
         } else {
-            showFlash("「\(titleText)」已在收藏夹里")
+            showFlash(L("「\(titleText)」已在收藏夹里", "“\(titleText)” is already in Favorites"))
         }
     }
 
     func addToFavorites(_ item: FileItem) {
         guard item.isFolderLike else {
-            showFlash("只能收藏文件夹")
+            showFlash(L("只能收藏文件夹", "Only folders can be added to Favorites"))
             return
         }
         if FavoritesStore.shared.add(item.url) {
-            showFlash("已收藏「\(item.name)」")
+            showFlash(L("已收藏「\(item.name)」", "Saved “\(item.name)” to Favorites"))
         } else {
-            showFlash("「\(item.name)」已在收藏夹里")
+            showFlash(L("「\(item.name)」已在收藏夹里", "“\(item.name)” is already in Favorites"))
         }
     }
 
@@ -862,7 +958,7 @@ final class BrowserModel: ObservableObject {
     func showInfo() {
         let targets = selectedItems
         guard !targets.isEmpty else {
-            showFlash("请先选中要查看属性的项目")
+            showFlash(L("请先选中要查看属性的项目", "Select what you want info about"))
             return
         }
 
@@ -937,9 +1033,9 @@ final class BrowserModel: ObservableObject {
         }
     }
 
-    /// 属性面板 / 删除确认 / 批量重命名打开时，方向键/快捷键不应继续操作后台列表
+    /// 属性面板 / 删除确认 / 批量重命名 / 关于 打开时，方向键/快捷键不应继续操作后台列表
     var hasModalOverlay: Bool {
-        info != nil || pendingPermanentDelete != nil || batchRename != nil
+        info != nil || pendingPermanentDelete != nil || batchRename != nil || showsAbout
     }
 
     // MARK: - 剪贴板
@@ -948,33 +1044,33 @@ final class BrowserModel: ObservableObject {
     func copySelection() {
         let targets = selectedItems.map(\.url)
         guard !targets.isEmpty else {
-            showFlash("请先选中要复制的内容")
+            showFlash(L("请先选中要复制的内容", "Select what you want to copy"))
             return
         }
         clipboard = FileClipboard(urls: targets, mode: .copy, sourceDirectory: currentURL)
         writeSystemPasteboard(targets)
         showFlash(targets.count == 1
-                  ? "已复制「\(targets[0].lastPathComponent)」，⌘V 粘贴"
-                  : "已复制 \(targets.count) 项，⌘V 粘贴")
+                  ? L("已复制「\(targets[0].lastPathComponent)」，⌘V 粘贴", "Copied “\(targets[0].lastPathComponent)” — ⌘V to paste")
+                  : L("已复制 \(targets.count) 项，⌘V 粘贴", "Copied \(targets.count) item(s) — ⌘V to paste"))
     }
 
     /// 剪切：只做标记，真正移动发生在粘贴时（和 Windows 一致，可以反悔）
     func cutSelection() {
         let targets = selectedItems.map(\.url)
         guard !targets.isEmpty else {
-            showFlash("请先选中要剪切的内容")
+            showFlash(L("请先选中要剪切的内容", "Select what you want to cut"))
             return
         }
         clipboard = FileClipboard(urls: targets, mode: .cut, sourceDirectory: currentURL)
         writeSystemPasteboard(targets)
         showFlash(targets.count == 1
-                  ? "已剪切「\(targets[0].lastPathComponent)」，⌘V 粘贴"
-                  : "已剪切 \(targets.count) 项，⌘V 粘贴")
+                  ? L("已剪切「\(targets[0].lastPathComponent)」，⌘V 粘贴", "Cut “\(targets[0].lastPathComponent)” — ⌘V to paste")
+                  : L("已剪切 \(targets.count) 项，⌘V 粘贴", "Cut \(targets.count) item(s) — ⌘V to paste"))
     }
 
     func paste(into destination: URL? = nil) {
         guard transfer == nil else {
-            showFlash("上一项操作还没结束")
+            showFlash(L("上一项操作还没结束", "The previous operation is still running"))
             return
         }
 
@@ -982,7 +1078,7 @@ final class BrowserModel: ObservableObject {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: targetDir.path, isDirectory: &isDirectory),
               isDirectory.boolValue else {
-            errorMessage = "「\(targetDir.lastPathComponent)」不是文件夹，无法粘贴到里面"
+            errorMessage = L("「\(targetDir.lastPathComponent)」不是文件夹，无法粘贴到里面", "“\(targetDir.lastPathComponent)” is not a folder — can’t paste into it")
             return
         }
 
@@ -1002,7 +1098,7 @@ final class BrowserModel: ObservableObject {
             .map { $0.standardizedFileURL }
             .filter { fm.fileExists(atPath: $0.path) }
         guard !sources.isEmpty else {
-            showFlash(clipboard == nil ? "没有可粘贴的内容" : "剪贴板里的内容已经不在了")
+            showFlash(clipboard == nil ? "没有可粘贴的内容" : L("剪贴板里的内容已经不在了", "The clipboard contents are gone"))
             return
         }
 
@@ -1010,7 +1106,7 @@ final class BrowserModel: ObservableObject {
         let targetPath = targetDir.path
         for source in sources {
             if targetPath == source.path || targetPath.hasPrefix(source.path + "/") {
-                errorMessage = "不能把「\(source.lastPathComponent)」粘贴到它自己里面"
+                errorMessage = L("不能把「\(source.lastPathComponent)」粘贴到它自己里面", "Can’t paste “\(source.lastPathComponent)” into itself")
                 return
             }
         }
@@ -1046,16 +1142,16 @@ final class BrowserModel: ObservableObject {
 
         // 移动时目标已有同名项：整批拒绝，绝不覆盖
         if !conflicts.isEmpty {
-            errorMessage = "「\(targetDir.lastPathComponent)」里已存在同名项目："
+            errorMessage = L("「\(targetDir.lastPathComponent)」里已存在同名项目：", "“\(targetDir.lastPathComponent)” already contains: ")
                 + conflicts.prefix(3).joined(separator: "、")
-                + (conflicts.count > 3 ? " 等" : "")
-                + "，未执行粘贴"
+                + (conflicts.count > 3 ? L(" 等", " and more") : "")
+                + L("，未执行粘贴", ", paste skipped")
             return
         }
 
         guard !requests.isEmpty else {
             if !skipped.isEmpty {
-                showFlash("「\(skipped[0])」已经在当前文件夹里")
+                showFlash(L("「\(skipped[0])」已经在当前文件夹里", "“\(skipped[0])” is already in this folder"))
             }
             return
         }
@@ -1067,7 +1163,7 @@ final class BrowserModel: ObservableObject {
     /// 规则和 Windows 一致：⌥ 强制复制、⌘ 强制移动，否则同卷移动、跨卷复制。
     func drop(urls: [URL], into targetDir: URL, modifiers: NSEvent.ModifierFlags) {
         guard transfer == nil else {
-            showFlash("上一项操作还没结束")
+            showFlash(L("上一项操作还没结束", "The previous operation is still running"))
             return
         }
 
@@ -1075,14 +1171,14 @@ final class BrowserModel: ObservableObject {
         let target = targetDir.standardizedFileURL
         var isDirectory: ObjCBool = false
         guard fm.fileExists(atPath: target.path, isDirectory: &isDirectory), isDirectory.boolValue else {
-            showFlash("「\(target.lastPathComponent)」不是文件夹")
+            showFlash(L("「\(target.lastPathComponent)」不是文件夹", "“\(target.lastPathComponent)” is not a folder"))
             return
         }
 
         let sources = urls.map { $0.standardizedFileURL }.filter { fm.fileExists(atPath: $0.path) }
         guard !sources.isEmpty else { return }
 
-        if let message = invalidTargetMessage(sources: sources, target: target, verb: "移动") {
+        if let message = invalidTargetMessage(sources: sources, target: target, verb: L("移动", "move")) {
             errorMessage = message
             return
         }
@@ -1121,16 +1217,16 @@ final class BrowserModel: ObservableObject {
         }
 
         if !conflicts.isEmpty {
-            errorMessage = "「\(target.lastPathComponent)」里已存在同名项目："
+            errorMessage = L("「\(target.lastPathComponent)」里已存在同名项目：", "“\(target.lastPathComponent)” already contains: ")
                 + conflicts.prefix(3).joined(separator: "、")
-                + (conflicts.count > 3 ? " 等" : "")
-                + "，未执行拖放"
+                + (conflicts.count > 3 ? L(" 等", " and more") : "")
+                + L("，未执行拖放", ", drop skipped")
             return
         }
 
         guard !requests.isEmpty else {
             if !skipped.isEmpty {
-                showFlash("「\(skipped[0])」已经在这个文件夹里")
+                showFlash(L("「\(skipped[0])」已经在这个文件夹里", "“\(skipped[0])” is already in this folder"))
             }
             return
         }
@@ -1164,9 +1260,9 @@ final class BrowserModel: ObservableObject {
             reload()
             select(urls: done.map(\.destination))
             if failures.isEmpty {
-                showFlash("已移动 \(done.count) 项到「\(targetName)」")
+                showFlash(L("已移动 \(done.count) 项到「\(targetName)」", "Moved \(done.count) item(s) to “\(targetName)”"))
             } else {
-                errorMessage = "部分项目移动失败：\n" + failures.joined(separator: "\n")
+                errorMessage = L("部分项目移动失败：\n", "Some items couldn’t be moved:\n") + failures.joined(separator: "\n")
             }
             return
         }
@@ -1175,7 +1271,7 @@ final class BrowserModel: ObservableObject {
         let cancellation = TransferCancellation()
         transferCancellation = cancellation
         let isCopyOnly = requests.allSatisfy { $0.mode == .copy }
-        let title = isCopyOnly ? "正在复制" : "正在移动"
+        let title = isCopyOnly ? L("正在复制", "Copying") : L("正在移动", "Moving")
         let total = requests.reduce(0) { $0 + TransferService.countFiles($1.source) }
         transfer = TransferProgress(title: title, completed: 0, total: max(total, 1), currentName: "")
 
@@ -1193,13 +1289,13 @@ final class BrowserModel: ObservableObject {
             select(urls: result.moved + result.copied)
 
             if !result.failures.isEmpty {
-                errorMessage = "部分项目处理失败：\n" + result.failures.joined(separator: "\n")
+                errorMessage = L("部分项目处理失败：\n", "Some items couldn’t be processed:\n") + result.failures.joined(separator: "\n")
             } else if result.cancelled {
                 let done = result.moved.count + result.copied.count
-                showFlash("已取消，其中 \(done) 项已完成")
+                showFlash(L("已取消，其中 \(done) 项已完成", "Cancelled — \(done) item(s) already done"))
             } else {
                 let done = result.moved.count + result.copied.count
-                showFlash("已\(isCopyOnly ? "复制" : "移动") \(done) 项到「\(targetName)」")
+                showFlash(L("已\(isCopyOnly ? "复制" : "移动") \(done) 项到「\(targetName)」", "Copied/moved \(done) item(s) to “\(targetName)”"))
             }
         }
 
@@ -1237,7 +1333,7 @@ final class BrowserModel: ObservableObject {
     private func invalidTargetMessage(sources: [URL], target: URL, verb: String) -> String? {
         let targetPath = target.path
         for source in sources where targetPath == source.path || targetPath.hasPrefix(source.path + "/") {
-            return "不能把「\(source.lastPathComponent)」\(verb)到它自己里面"
+            return L("不能把「\(source.lastPathComponent)」\(verb)到它自己里面", "Can’t \(verb) “\(source.lastPathComponent)” into itself")
         }
         return nil
     }
@@ -1245,7 +1341,7 @@ final class BrowserModel: ObservableObject {
     func cancelTransfer() {
         guard transferCancellation != nil else { return }
         transferCancellation?.cancel()
-        showFlash("正在取消…")
+        showFlash(L("正在取消…", "Cancelling…"))
     }
 
     /// 选中一批 URL（粘贴完成后高亮新生成的项目）
@@ -1293,7 +1389,7 @@ final class BrowserModel: ObservableObject {
             return
         }
         guard let item = selectedItems.first else {
-            showFlash("请先选中一个项目再重命名")
+            showFlash(L("请先选中一个项目再重命名", "Select one item to rename"))
             return
         }
         renamingURL = item.url
@@ -1317,11 +1413,11 @@ final class BrowserModel: ObservableObject {
 
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            errorMessage = "名称不能为空"
+            errorMessage = L("名称不能为空", "The name can’t be empty")
             return false
         }
         if trimmed.contains("/") || trimmed.contains(":") {
-            errorMessage = "名称不能包含「/」或「:」"
+            errorMessage = L("名称不能包含「/」或「:」", "The name can’t contain “/” or “:”")
             return false
         }
         if trimmed == source.lastPathComponent {
@@ -1331,7 +1427,7 @@ final class BrowserModel: ObservableObject {
 
         let target = source.deletingLastPathComponent().appendingPathComponent(trimmed)
         if FileManager.default.fileExists(atPath: target.path) {
-            errorMessage = "「\(trimmed)」已存在，请换一个名字"
+            errorMessage = L("「\(trimmed)」已存在，请换一个名字", "“\(trimmed)” already exists — pick another name")
             return false
         }
 
@@ -1339,16 +1435,16 @@ final class BrowserModel: ObservableObject {
             try FileManager.default.moveItem(at: source, to: target)
             renamingURL = nil
             registerUndo(UndoEntry(
-                title: "重命名为「\(trimmed)」",
+                title: L("重命名为「\(trimmed)」", "Rename to “\(trimmed)”"),
                 undo: { [weak self] in self?.moveItemReportingFailure(from: target, to: source) },
                 redo: { [weak self] in self?.moveItemReportingFailure(from: source, to: target) }
             ))
             reload()
             focus(url: target, scroll: false)
-            showFlash("已重命名为「\(trimmed)」")
+            showFlash(L("已重命名为「\(trimmed)」", "Renamed to “\(trimmed)”"))
             return true
         } catch {
-            errorMessage = "重命名失败：\(error.localizedDescription)"
+            errorMessage = L("重命名失败：\(error.localizedDescription)", "Rename failed: \(error.localizedDescription)")
             return false
         }
     }
@@ -1359,7 +1455,7 @@ final class BrowserModel: ObservableObject {
     func beginBatchRename() {
         let targets = selectedItems
         guard targets.count > 1 else {
-            showFlash("请先选中多个项目")
+            showFlash(L("请先选中多个项目", "Select more than one item"))
             return
         }
         renamingURL = nil
@@ -1389,7 +1485,7 @@ final class BrowserModel: ObservableObject {
             return
         }
         guard plan.isApplicable else {
-            if plan.changes.isEmpty { showFlash("名称没有变化") }
+            if plan.changes.isEmpty { showFlash(L("名称没有变化", "The name didn’t change")) }
             return
         }
 
@@ -1399,30 +1495,30 @@ final class BrowserModel: ObservableObject {
 
         guard failures.isEmpty else {
             reload()
-            errorMessage = "批量重命名未完成：\n" + failures.joined(separator: "\n")
+            errorMessage = L("批量重命名未完成：\n", "Batch rename didn’t finish:\n") + failures.joined(separator: "\n")
             return
         }
 
         let backward = moves.map { (from: $0.to, to: $0.from) }
         registerUndo(UndoEntry(
-            title: "批量重命名 \(moves.count) 项",
+            title: L("批量重命名 \(moves.count) 项", "Batch rename \(moves.count) item(s)"),
             undo: { [weak self] in
                 let result = Self.applyRenames(backward)
                 if !result.isEmpty {
-                    self?.errorMessage = "撤销批量重命名失败：\n" + result.joined(separator: "\n")
+                    self?.errorMessage = L("撤销批量重命名失败：\n", "Couldn’t undo the batch rename:\n") + result.joined(separator: "\n")
                 }
             },
             redo: { [weak self] in
                 let result = Self.applyRenames(moves)
                 if !result.isEmpty {
-                    self?.errorMessage = "重做批量重命名失败：\n" + result.joined(separator: "\n")
+                    self?.errorMessage = L("重做批量重命名失败：\n", "Couldn’t redo the batch rename:\n") + result.joined(separator: "\n")
                 }
             }
         ))
 
         reload()
         select(urls: moves.map { $0.to })
-        showFlash("已重命名 \(moves.count) 项")
+        showFlash(L("已重命名 \(moves.count) 项", "Renamed \(moves.count) item(s)"))
     }
 
     /// 两阶段改名：先全部挪到临时名，再挪到目标名。
@@ -1476,19 +1572,19 @@ final class BrowserModel: ObservableObject {
     /// 把选中项压缩成 zip，落在当前文件夹
     func compressSelection() {
         guard !isBusy else {
-            showFlash("上一项操作还没结束")
+            showFlash(L("上一项操作还没结束", "The previous operation is still running"))
             return
         }
         let targets = selectedItems.map(\.url)
         guard !targets.isEmpty else {
-            showFlash("请先选中要压缩的项目")
+            showFlash(L("请先选中要压缩的项目", "Select what you want to compress"))
             return
         }
         let destination = ArchiveService.compressDestination(for: targets, in: currentURL)
         runArchive(
-            title: "正在压缩 \(destination.lastPathComponent)",
+            title: L("正在压缩 \(destination.lastPathComponent)", "Compressing \(destination.lastPathComponent)"),
             result: destination,
-            success: "已压缩为「\(destination.lastPathComponent)」"
+            success: L("已压缩为「\(destination.lastPathComponent)」", "Compressed to “\(destination.lastPathComponent)”")
         ) { task in
             try ArchiveService.compress(items: targets, to: destination, task: task)
         }
@@ -1499,12 +1595,12 @@ final class BrowserModel: ObservableObject {
     /// - toOwnFolder = false：解到当前文件夹；先查顶层同名项，有冲突直接拒绝
     func extractSelection(toOwnFolder: Bool = true) {
         guard !isBusy else {
-            showFlash("上一项操作还没结束")
+            showFlash(L("上一项操作还没结束", "The previous operation is still running"))
             return
         }
         let archives = selectedItems.filter { ArchiveService.isArchive($0.url) }
         guard !archives.isEmpty else {
-            showFlash("请先选中 zip 压缩包")
+            showFlash(L("请先选中 zip 压缩包", "Select a ZIP archive"))
             return
         }
 
@@ -1514,11 +1610,11 @@ final class BrowserModel: ObservableObject {
             }
             let count = archives.count
             runArchive(
-                title: count == 1 ? "正在解压 \(archives[0].name)" : "正在解压 \(count) 个压缩包",
+                title: count == 1 ? L("正在解压 \(archives[0].name)", "Extracting \(archives[0].name)") : L("正在解压 \(count) 个压缩包", "Extracting \(count) archives"),
                 result: destinations.last,
                 success: count == 1
-                    ? "已解压到「\(destinations[0].lastPathComponent)」"
-                    : "已解压 \(count) 个压缩包"
+                    ? L("已解压到「\(destinations[0].lastPathComponent)」", "Extracted to “\(destinations[0].lastPathComponent)”")
+                    : L("已解压 \(count) 个压缩包", "Extracted \(count) archives")
             ) { task in
                 var failures: [String] = []
                 for (index, archive) in archives.enumerated() {
@@ -1537,15 +1633,15 @@ final class BrowserModel: ObservableObject {
         }
 
         guard archives.count == 1 else {
-            showFlash("「解压到当前文件夹」一次只能处理一个压缩包")
+            showFlash(L("「解压到当前文件夹」一次只能处理一个压缩包", "“Extract Here” handles one archive at a time"))
             return
         }
         let archive = archives[0].url
         let targetDirectory = currentURL
         runArchive(
-            title: "正在解压 \(archive.lastPathComponent)",
+            title: L("正在解压 \(archive.lastPathComponent)", "Extracting \(archive.lastPathComponent)"),
             result: nil,
-            success: "已解压到当前文件夹"
+            success: L("已解压到当前文件夹", "Extracted into this folder")
         ) { task in
             try ArchiveService.extract(archive: archive, to: targetDirectory, task: task)
         }
@@ -1575,7 +1671,7 @@ final class BrowserModel: ObservableObject {
             reload()
             if let failure {
                 if failure == ArchiveService.Failure.cancelled.errorDescription {
-                    showFlash("已取消")
+                    showFlash(L("已取消", "Cancelled"))
                 } else {
                     errorMessage = failure
                 }
@@ -1620,7 +1716,7 @@ final class BrowserModel: ObservableObject {
     func cancelArchive() {
         guard archiveTask != nil else { return }
         archiveTask?.cancel()
-        showFlash("正在取消…")
+        showFlash(L("正在取消…", "Cancelling…"))
     }
 
     // MARK: - 删除
@@ -1646,19 +1742,19 @@ final class BrowserModel: ObservableObject {
 
         if !trashed.isEmpty {
             registerUndo(UndoEntry(
-                title: "移到废纸篓 \(trashed.count) 项",
+                title: L("移到废纸篓 \(trashed.count) 项", "Move \(trashed.count) item(s) to the Trash"),
                 undo: { [weak self] in
                     guard let self else { return }
                     let fm = FileManager.default
                     for pair in trashed.reversed() where fm.fileExists(atPath: pair.inTrash.path) {
                         guard !fm.fileExists(atPath: pair.original.path) else {
-                            self.errorMessage = "原位置已有同名项目，无法还原「\(pair.original.lastPathComponent)」"
+                            self.errorMessage = L("原位置已有同名项目，无法还原「\(pair.original.lastPathComponent)」", "An item with the same name is already in the original location; can’t restore “\(pair.original.lastPathComponent)”")
                             continue
                         }
                         do {
                             try fm.moveItem(at: pair.inTrash, to: pair.original)
                         } catch {
-                            self.errorMessage = "从废纸篓还原失败：\(error.localizedDescription)"
+                            self.errorMessage = L("从废纸篓还原失败：\(error.localizedDescription)", "Couldn’t restore from the Trash: \(error.localizedDescription)")
                         }
                     }
                 },
@@ -1668,7 +1764,7 @@ final class BrowserModel: ObservableObject {
                         do {
                             try FileManager.default.trashItem(at: pair.original, resultingItemURL: nil)
                         } catch {
-                            self.errorMessage = "再次移到废纸篓失败：\(error.localizedDescription)"
+                            self.errorMessage = L("再次移到废纸篓失败：\(error.localizedDescription)", "Couldn’t move it to the Trash again: \(error.localizedDescription)")
                         }
                     }
                 }
@@ -1677,9 +1773,9 @@ final class BrowserModel: ObservableObject {
 
         reload()
         if failures.isEmpty {
-            showFlash(targets.count == 1 ? "已移到废纸篓" : "已把 \(targets.count) 项移到废纸篓")
+            showFlash(targets.count == 1 ? L("已移到废纸篓", "Moved to the Trash") : L("已把 \(targets.count) 项移到废纸篓", "Moved \(targets.count) item(s) to the Trash"))
         } else {
-            errorMessage = "部分项目无法移到废纸篓：\n" + failures.joined(separator: "\n")
+            errorMessage = L("部分项目无法移到废纸篓：\n", "Some items couldn’t be moved to the Trash:\n") + failures.joined(separator: "\n")
         }
     }
 
@@ -1688,7 +1784,7 @@ final class BrowserModel: ObservableObject {
         do {
             try FileManager.default.moveItem(at: from, to: to)
         } catch {
-            errorMessage = "操作失败：\(error.localizedDescription)"
+            errorMessage = L("操作失败：\(error.localizedDescription)", "Operation failed: \(error.localizedDescription)")
         }
     }
 
@@ -1716,7 +1812,7 @@ final class BrowserModel: ObservableObject {
             let path = item.url.standardizedFileURL.path
             let current = currentURL.standardizedFileURL.path
             if path == current || current.hasPrefix(path + "/") {
-                failures.append("\(item.name)：不能删除当前所在目录")
+                failures.append(L("\(item.name)：不能删除当前所在目录", "\(item.name): can’t delete the folder you’re in"))
                 continue
             }
             do {
@@ -1729,21 +1825,21 @@ final class BrowserModel: ObservableObject {
 
         reload()
         if failures.isEmpty {
-            showFlash("已彻底删除 \(removed) 项")
+            showFlash(L("已彻底删除 \(removed) 项", "Deleted \(removed) item(s) permanently"))
         } else {
-            errorMessage = "部分项目删除失败：\n" + failures.joined(separator: "\n")
+            errorMessage = L("部分项目删除失败：\n", "Some items couldn’t be deleted:\n") + failures.joined(separator: "\n")
         }
     }
 
     /// 新建文件夹，重名时自动加序号（Windows 的"新建文件夹 2"习惯）
     func createFolder() {
         let fm = FileManager.default
-        var name = "新建文件夹"
+        var name = L("新建文件夹", "New Folder")
         var index = 2
         var target = currentURL.appendingPathComponent(name)
 
         while fm.fileExists(atPath: target.path) {
-            name = "新建文件夹 \(index)"
+            name = "\(L("新建文件夹", "New Folder")) \(index)"
             target = currentURL.appendingPathComponent(name)
             index += 1
         }
@@ -1751,7 +1847,7 @@ final class BrowserModel: ObservableObject {
         do {
             try fm.createDirectory(at: target, withIntermediateDirectories: false)
             registerUndo(UndoEntry(
-                title: "新建「\(name)」",
+                title: L("新建「\(name)」", "Create “\(name)”"),
                 undo: { [weak self] in
                     guard let self else { return }
                     // 只撤销空文件夹，绝不连带删掉用户后来放进去的东西
@@ -1759,7 +1855,7 @@ final class BrowserModel: ObservableObject {
                     if contents.isEmpty {
                         try? FileManager.default.removeItem(at: target)
                     } else {
-                        self.errorMessage = "「\(name)」里已经有内容了，没有撤销"
+                        self.errorMessage = L("「\(name)」里已经有内容了，没有撤销", "“\(name)” already had contents, so it can’t be undone")
                     }
                 },
                 redo: { [weak self] in
@@ -1767,15 +1863,15 @@ final class BrowserModel: ObservableObject {
                         try FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
                         self?.focus(url: target.standardizedFileURL, scroll: false)
                     } catch {
-                        self?.errorMessage = "重做新建失败：\(error.localizedDescription)"
+                        self?.errorMessage = L("重做新建失败：\(error.localizedDescription)", "Couldn’t redo creating the folder: \(error.localizedDescription)")
                     }
                 }
             ))
             reload()
             focus(url: target.standardizedFileURL, scroll: false)
-            showFlash("已新建「\(name)」")
+            showFlash(L("已新建「\(name)」", "Created “\(name)”"))
         } catch {
-            errorMessage = "新建文件夹失败：\(error.localizedDescription)"
+            errorMessage = L("新建文件夹失败：\(error.localizedDescription)", "Couldn’t create the folder: \(error.localizedDescription)")
         }
     }
 

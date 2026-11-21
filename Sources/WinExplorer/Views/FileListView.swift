@@ -141,13 +141,13 @@ struct FileListView: View {
         GeometryReader { geometry in
             ZStack(alignment: .topLeading) {
                 FileListLayout.row(widths: model.columnWidths) {
-                    headerButton("名称", column: .name, alignment: .leading)
+                    headerButton(SortColumn.name.title, column: .name, alignment: .leading)
                 } size: {
-                    headerButton("大小", column: .size, alignment: .trailing)
+                    headerButton(SortColumn.size.title, column: .size, alignment: .trailing)
                 } date: {
-                    headerButton("修改日期", column: .modified, alignment: .leading)
+                    headerButton(SortColumn.modified.title, column: .modified, alignment: .leading)
                 } kind: {
-                    headerButton("类型", column: .kind, alignment: .leading)
+                    headerButton(SortColumn.kind.title, column: .kind, alignment: .leading)
                 }
                 .frame(height: FileListLayout.rowHeight)
                 .background(Color(nsColor: .controlBackgroundColor))
@@ -186,7 +186,7 @@ struct FileListView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("按\(title)排序")
+        .help(L("按\(title)排序", "Sort by \(title)"))
     }
 
     private func dividerHandle(_ column: ResizableColumn) -> some View {
@@ -350,55 +350,57 @@ struct FileListView: View {
     private func contextMenu(for item: FileItem) -> some View {
         let inSelection = model.selection.contains(item.url)
 
-        Button("打开") {
+        Button(L("打开", "Open")) {
             if inSelection {
                 model.openSelection()
             } else {
                 model.open(item)
             }
         }
-        Button("快速预览") {
+        Button(L("快速预览", "Quick Look")) {
             if !inSelection { model.selectOnly(item) }
             model.toggleQuickLook()
         }
-        Button("在 Finder 中显示") {
+        Button(L("在 Finder 中显示", "Show in Finder")) {
             model.revealInFinder(item)
         }
-        Button("显示简介") {
+        Button(L("显示简介", "Get Info")) {
             if !inSelection { model.selectOnly(item) }
             model.showInfo()
         }
         if item.isFolderLike {
-            Button("添加到收藏夹") {
+            Button(L("添加到收藏夹", "Add to Favorites")) {
                 model.addToFavorites(item)
             }
         }
         Divider()
-        Button("剪切") {
+        Button(L("剪切", "Cut")) {
             if !inSelection { model.selectOnly(item) }
             model.cutSelection()
         }
-        Button("复制") {
+        Button(L("复制", "Copy")) {
             if !inSelection { model.selectOnly(item) }
             model.copySelection()
         }
         if item.isFolderLike {
-            Button("粘贴到此处") {
+            Button(L("粘贴到此处", "Paste Into Folder")) {
                 model.paste(into: item.url)
             }
             .disabled(!model.canPaste || model.isTransferring)
         }
         if inSelection && model.selection.count > 1 {
-            Button("复制 \(model.selection.count) 项路径") {
+            Button(L("复制 \(model.selection.count) 项路径", "Copy Paths of \(model.selection.count) Items")) {
                 model.copySelectedPaths()
             }
         } else {
-            Button("复制路径") {
+            Button(L("复制路径", "Copy Path")) {
                 model.copyPath(item)
             }
         }
         Divider()
-        Button(inSelection && model.selection.count > 1 ? "批量重命名…" : "重命名…") {
+        Button(inSelection && model.selection.count > 1
+               ? L("批量重命名…", "Batch Rename…")
+               : L("重命名…", "Rename…")) {
             if inSelection && model.selection.count > 1 {
                 model.beginBatchRename()
             } else {
@@ -406,34 +408,35 @@ struct FileListView: View {
             }
         }
         Divider()
-        Button("压缩为 zip") {
+        Button(L("压缩为 zip", "Compress to ZIP")) {
             if !inSelection { model.selectOnly(item) }
             model.compressSelection()
         }
         .disabled(!model.canCompress)
         if ArchiveService.isArchive(item.url) {
-            Button("解压到「\(ArchiveService.extractDestination(for: item.url, in: model.currentURL).lastPathComponent)」") {
+            let folderName = ArchiveService.extractDestination(for: item.url, in: model.currentURL).lastPathComponent
+            Button(L("解压到「\(folderName)」", "Extract to “\(folderName)”")) {
                 if !inSelection { model.selectOnly(item) }
                 model.extractSelection(toOwnFolder: true)
             }
             .disabled(!model.canExtract)
-            Button("解压到当前文件夹") {
+            Button(L("解压到当前文件夹", "Extract Here")) {
                 if !inSelection { model.selectOnly(item) }
                 model.extractSelection(toOwnFolder: false)
             }
             .disabled(!model.canExtract)
         }
         Divider()
-        Button("移到废纸篓") {
+        Button(L("移到废纸篓", "Move to Trash")) {
             if !inSelection { model.selectOnly(item) }
             model.moveSelectionToTrash()
         }
-        Button("彻底删除…") {
+        Button(L("彻底删除…", "Delete Immediately…")) {
             if !inSelection { model.selectOnly(item) }
             model.requestPermanentDelete()
         }
         Divider()
-        Button("刷新") {
+        Button(L("刷新", "Refresh")) {
             model.reload()
         }
     }
@@ -441,26 +444,26 @@ struct FileListView: View {
     /// 空白区域右键菜单（Windows 在文件夹空白处右键的效果）
     @ViewBuilder
     private var emptyAreaMenu: some View {
-        Button("新建文件夹") {
+        Button(L("新建文件夹", "New Folder")) {
             model.createFolder()
         }
-        Button("搜索当前文件夹…") {
+        Button(L("搜索当前文件夹…", "Search This Folder…")) {
             model.beginSearch()
         }
-        Button("将当前文件夹添加到收藏夹") {
+        Button(L("将当前文件夹添加到收藏夹", "Add This Folder to Favorites")) {
             model.addCurrentDirectoryToFavorites()
         }
         .disabled(model.isCurrentDirectoryFavorite)
-        Button("粘贴") {
+        Button(L("粘贴", "Paste")) {
             model.paste()
         }
         .disabled(!model.canPaste || model.isTransferring)
         Divider()
-        Button("全选") {
+        Button(L("全选", "Select All")) {
             model.selectAll()
         }
         .disabled(model.items.isEmpty)
-        Button("刷新") {
+        Button(L("刷新", "Refresh")) {
             model.reload()
         }
         Divider()
@@ -476,14 +479,15 @@ struct FileListView: View {
             }
         }
         Divider()
-        Button("在 Finder 中显示") {
+        Button(L("在 Finder 中显示", "Show in Finder")) {
             model.revealCurrentDirectory()
         }
-        Button("复制当前文件夹路径") {
+        Button(L("复制当前文件夹路径", "Copy Folder Path")) {
             model.copyCurrentDirectoryPath()
         }
         Divider()
-        Toggle("显示隐藏文件", isOn: $model.showHidden)
+        Toggle(L("显示隐藏文件", "Show Hidden Files"), isOn: $model.showHidden)
+        Toggle(L("计算文件夹大小", "Calculate Folder Sizes"), isOn: $model.showsFolderSizes)
     }
 
     private var emptyState: some View {
@@ -492,17 +496,18 @@ struct FileListView: View {
                 .font(.system(size: 36, weight: .light))
                 .foregroundStyle(.quaternary)
             if model.isSearching {
-                Text("没有与「\(model.searchQuery)」匹配的项目")
+                Text(L("没有与「\(model.searchQuery)」匹配的项目",
+                       "No items match “\(model.searchQuery)”"))
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
-                Text("Esc 退出搜索，⌘F 换个关键词")
+                Text(L("Esc 退出搜索，⌘F 换个关键词", "Esc to exit search, ⌘F for another keyword"))
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
             } else {
-                Text("此文件夹为空")
+                Text(L("此文件夹为空", "This folder is empty"))
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
-                Text("⇧⌘N 可以新建文件夹")
+                Text(L("⇧⌘N 可以新建文件夹", "⇧⌘N to create a folder"))
                     .font(.system(size: 11))
                     .foregroundStyle(.tertiary)
             }
@@ -616,7 +621,7 @@ struct FileRow: View {
                 }
             }
         } size: {
-            Text(item.sizeText)
+            Text(model.sizeText(for: item))
                 .font(.system(size: 12).monospacedDigit())
                 .foregroundStyle(secondaryColor)
         } date: {
