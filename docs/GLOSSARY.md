@@ -100,4 +100,5 @@
 | **列分隔线** | **只在表头**画的发丝线（行内不画），位置由 `dividerX` 推算；悬停时变 2pt 强调色提示可拖 | `FileListView.dividerHandle` |
 | **选中高亮内缩** | 访达比例：左右各让 5pt、上下各让 1pt、圆角 5pt；高亮层在条纹之上，会盖住分隔线 | `FileListLayout.selection*Inset` |
 | **列宽光标** | 悬停在列分隔线上的自绘光标：中间竖线 + 两侧箭头，白色描边适配深浅背景 | `FileListView.DividerCursor` |
+| **列内留白** | 左对齐列的内容与列边界之间的 8pt 间距；分隔线画在列边界上，不留白文字会压线 | `FileListLayout.columnTextInset` |
 

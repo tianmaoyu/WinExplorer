@@ -25,6 +25,11 @@ enum FileListLayout {
     /// 列分隔线宽度（1px 在 Retina 上正好是发丝线）
     static let columnDividerWidth: CGFloat = 1
 
+    /// 列内容与左边界之间的留白。
+    /// 分隔线就画在列边界上，而「修改日期」「类型」是左对齐的 —— 不留这段距离
+    /// 文字会直接压在线上。8pt 是目测下来既透气又不浪费宽度的值。
+    static let columnTextInset: CGFloat = 8
+
     /// 交替条纹的底色。用系统语义色，深浅色模式自动切换，
     /// 且和 `textBackgroundColor` 的对比度是系统调好的，不会刺眼。
     static var stripeColor: Color {
@@ -63,10 +68,14 @@ enum FileListLayout {
             size()
                 .frame(width: widths.size, alignment: .trailing)
                 .padding(.trailing, sizeTrailingPadding)
+            // 左对齐的列要跟分隔线拉开距离：padding 放在 frame 之前，
+            // 这样缩进算在列宽内部，列边界与 dividerX 仍然一致
             date()
+                .padding(.leading, columnTextInset)
                 .frame(width: widths.date, alignment: .leading)
                 .padding(.trailing, dateTrailingPadding)
             kind()
+                .padding(.leading, columnTextInset)
                 .frame(width: widths.kind, alignment: .leading)
         }
         .padding(.horizontal, horizontalPadding)

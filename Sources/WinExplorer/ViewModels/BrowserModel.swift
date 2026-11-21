@@ -1057,7 +1057,10 @@ final class BrowserModel: ObservableObject {
         let widest = texts.reduce(CGFloat(0)) { partial, text in
             max(partial, (text as NSString).size(withAttributes: [.font: font]).width)
         }
-        resizeColumn(column, to: ceil(widest) + 26)
+        // 左对齐的列（日期 / 类型）内容还带一段左内缩，自适应时要把这段算进去，
+        // 否则双击「按内容自适应」会把列压得刚好装不下文字
+        let textInset: CGFloat = column == .size ? 0 : FileListLayout.columnTextInset
+        resizeColumn(column, to: ceil(widest) + 26 + textInset)
     }
 
     /// 一次把三列都调成刚好
