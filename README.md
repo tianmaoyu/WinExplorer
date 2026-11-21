@@ -1,254 +1,178 @@
 # WinExplorer
 
-macOS 上的「Windows 资源管理器」式文件浏览器，SwiftUI + Swift 原生实现，无 Xcode 工程、无第三方依赖。
+**A Windows Explorer–style file manager for macOS — built with plain SwiftUI, zero third-party dependencies.**
 
-当前版本：**1.4.10**（列表视图对齐访达：交替条纹、贯穿的列分隔线、圆角内缩的选中高亮，ADR 0017；此前 1.4.9：修复右键菜单卡死 + 运行日志），窗口尺寸 1060×680，启动后回到上次浏览的目录。路线图（30 项）已全部落地。
-本阶段的重点是把「文件夹操作」做扎实，应用包（`.app`）一律按普通文件处理，不做应用专属逻辑。
+![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)
+![Swift 5.9](https://img.shields.io/badge/Swift-5.9-orange)
+![No dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
+![Self-tests](https://img.shields.io/badge/self--tests-404%20passing-success)
+![License MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
-## 已实现
+![WinExplorer](docs/screenshots/main-light.png)
 
-| 能力 | 说明 |
+中文说明见 [README.zh-CN.md](README.zh-CN.md)。
+
+---
+
+## Why
+
+macOS's Finder and Windows's File Explorer encode two different sets of habits. If you've spent
+years in Explorer, Finder keeps getting in the way: folders don't sort first, there's no
+expandable tree in the list, the path bar isn't editable, <kbd>F2</kbd> doesn't rename, and
+<kbd>Backspace</kbd> doesn't go up a level.
+
+WinExplorer is a native macOS app that behaves like Explorer where it matters, while looking
+like it belongs on the Mac. Not a port, not an Electron wrapper — ~13.7k lines of Swift,
+SwiftUI + AppKit, built as a plain SwiftPM executable (there is no `.xcodeproj`).
+
+## Features
+
+**Navigation**
+
+- Expandable **tree view** in the list — click the disclosure triangle to see a folder's
+  contents in place, with per-level indentation and the full path of the selected item in the
+  status bar
+- **Tabs** with drag-out-to-new-window and drop-on-`+`-to-open-in-new-tab
+- **Editable address bar** (<kbd>⌘L</kbd>): <kbd>Enter</kbd> to go, <kbd>Tab</kbd> to complete;
+  a bad path turns red instead of navigating
+- Breadcrumbs collapse to `first › … › last two` on deep paths, with a menu listing every
+  hidden segment
+- Back / forward / up with a real history stack, buttons and menu items disabling in sync
+
+**File operations**
+
+- Copy / cut / paste, with the system pasteboard bridged both ways (paste to and from Finder)
+- Drag and drop onto folder rows, empty space, the sidebar and breadcrumb segments —
+  move within a volume, copy across volumes, <kbd>⌥</kbd> forces copy, <kbd>⌘</kbd> forces move
+- Rename in place (<kbd>F2</kbd>), batch rename for multi-selection
+- **Move to Trash with a cascade summary** — before anything is deleted you see
+  "includes 3 subfolders, 12 files"; permanent delete is a separate, harder action
+- **Open With** — pick an app for this one time, or set the system default, without shelling
+  out to AppleScript
+- Undo / redo covering rename, move, copy, new folder and trash
+
+**Look and feel**
+
+- Detail list with resizable columns, alternating row stripes, hairline column separators in
+  the header, and Finder-proportioned selection highlights
+- Three view modes (details / compact list / icon grid)
+- Light and dark appearance, both first-class
+
+**Engineering**
+
+- **Nothing blocks the main thread**: directory reads, icon extraction and folder-size scans
+  all run off-main with generation tokens, so a stalling network share can't freeze the window
+- **Built-in run log** at `~/Library/Logs/WinExplorer/` with main-thread hang detection and
+  `fd` / thread / memory sampling — because "it broke after a while" is not a bug report you
+  can act on
+- **404 self-test assertions**, runnable in one command, exercising real files in a temporary
+  directory (no mocks)
+- **22 ADRs** in [`docs/adr/`](docs/adr) recording every non-obvious decision — including the
+  ones that were later reverted
+
+## Screenshots
+
+| Light | Dark |
 |---|---|
-| 侧边栏 | 个人文件夹 / 桌面 / 文稿 / 下载 / 应用程序 + 本机卷 |
-| 面包屑地址栏 | 视觉对齐 Windows 11：整条浅色圆角容器 + 左侧当前位置图标 + 段落间细 `›`；点任意一级直接跳转，当前段只用字重区分（不用蓝色胶囊）；悬停有浅灰底，拖文件到某一段有蓝色落点框。**点击列表空白处 / 文件行 / ⌘F 聚焦搜索框时自动退出编辑态**（编辑是独占输入状态） |
-| 地址栏折叠 | 路径超过 5 段时收成「首段 › … › 末两段」，点 `…` 是下拉菜单，列出全部被折叠的段（对齐 Win11，不再横向滚动看不到当前目录） |
-| **可编辑地址栏** | 点地址栏空白处或 ⌘L 切换成路径输入框：Enter 前往、Tab 补全、Esc 取消；路径不存在时红框提示且不改目录；输入文件路径会跳到它所在目录并选中它 |
-| **搜索框** | 地址栏右侧、与地址栏同高的搜索框（⌘F 聚焦，占位文案带当前文件夹名）实时过滤当前文件夹：忽略大小写、清空即恢复；Esc 退出搜索；状态栏显示「搜索「x」· N 项匹配」；换目录自动清空 |
-| **属性面板** | ⌘I 或右键「显示简介」：图标、类型、大小、占用空间、扩展名、位置、创建/修改时间、POSIX 权限、所有者；文件夹递归统计大小与文件数（后台算，可关闭丢弃）；多选时汇总项目数与总大小 |
-| **自动刷新** | 目录被外部程序改动（新建/删除/改名）后 0.25s 内自动刷新列表，保留当前选择与焦点；自己操作引起的变更不会重复刷新 |
-| 详细信息列表 | 名称 / 大小 / 修改日期 / 类型 四列，点表头排序，升降序切换 |
-| 文件夹优先 | 任何排序方式下文件夹都在最前，和 Windows 一致 |
-| 双击打开 | 文件夹进入、文件用默认程序打开（`.app` 也按文件处理，直接交给系统） |
-| 前进 / 后退 / 上一级 | 完整历史栈，按钮与菜单快捷键同步禁用状态 |
-| **多选** | ⌘ 点击加选/取消、Shift 连选、⌘A 全选、点空白清空 |
-| **键盘导航** | ↑↓ 移动、PgUp/PgDn 翻页、Home/End 首末，选中项自动滚进视口 |
-| **选中汇总** | 状态栏显示「已选 N 项 · 共 X」，文件夹不计入大小 |
-| **行内重命名** | F2 或右键/菜单进入，默认只选中主文件名，Enter 提交、Esc 取消、点击别处提交；重名、含 `/`、空名就地提示且不覆盖原文件 |
-| **移到废纸篓** | ⌘⌫ 直接移入废纸篓（可恢复），完成后状态栏提示 |
-| **彻底删除** | ⇧⌘⌫ 弹出窗口内确认层，**只有鼠标点「彻底删除」才执行**；不会进废纸篓，不可恢复 |
-| **复制 / 剪切 / 粘贴** | ⌘C / ⌘X / ⌘V；同卷剪切粘贴用 `moveItem` 瞬时完成；复制与跨卷移动后台执行，底部进度卡可取消 |
-| **剪切标记** | 剪切后的行整体变淡（Windows 的「待移动」观感），粘贴成功后自动清除 |
-| **重名不覆盖** | 复制时生成「报告 副本.pdf」「报告 副本 2.pdf」；剪切遇到同名整批拒绝并提示 |
-| **粘贴校验** | 禁止把文件夹粘进它自己或子目录；目标不是文件夹时直接拒绝；粘贴后自动选中新生成的项目 |
-| **系统剪贴板互通** | 复制时把文件 URL 写进系统剪贴板，可以直接粘到 Finder；也能粘进来从 Finder 复制的文件 |
-| **空白区右键菜单** | 新建文件夹 / 粘贴 / 全选 / 刷新 / 在 Finder 中显示 / 复制当前文件夹路径 / 显示隐藏文件 |
-| **拖拽** | 行可拖到文件夹行、列表空白处、侧边栏、面包屑；同卷移动、跨卷复制，⌥ 强制复制、⌘ 强制移动；落点有蓝色/白色描边 |
-| **多选整批拖** | 拖已选中的行会带上整个选区（按列表顺序），拖未选中的行先选中它再单独拖 |
-| **拖到 Finder** | 用 AppKit 拖拽会话发起，拖出去的也是完整多个文件，不只是第一个 |
-| **撤销 / 重做** | ⌘Z / ⇧⌘Z：重命名、移动、复制、新建文件夹、移到废纸篓都可回滚；菜单里会显示具体动作（如「撤销移动到「下载」」） |
-| **列宽拖拽** | 拖动表头分隔线调整「大小 / 修改日期 / 类型」列宽，双击分隔线按内容自适应，⌘0 一次调好三列 |
-| **三种视图** | 详细信息（四列可排序）/ 列表（紧凑单列）/ 图标（网格），工具栏分段控件或 ⌘1 ⌘2 ⌘3 切换 |
-| **状态记忆** | 视图模式、列宽、排序方式、隐藏文件开关、上次浏览目录都会记住，重启原样恢复 |
-| **标签页** | ⌘T 新建（沿用当前目录）、⌘W 关闭、⌃Tab / ⌃⇧Tab 切换、点标签切换、拖标签排序；每个标签有独立目录/历史/选择/搜索；只剩一个标签时 ⌘W 关窗口 |
-| **快速预览** | 空格在系统 Quick Look 面板里预览选中项，多选时可 ↑↓ 在预览间切换并同步列表选中；再按空格或 Esc 关闭 |
-| **收藏夹** | 侧边栏「收藏夹」：点 + 收藏当前文件夹、右键文件夹「添加到收藏夹」、拖文件夹到标题添加、右键移除；存 UserDefaults，重启保留 |
-| **批量重命名** | 多选后 F2 / ⇧⌘R / 右键「批量重命名…」打开面板：**序号命名**（基名 + 分隔符 + 序号，可选起始序号与 2/3/4 位补零）或**查找替换**（可区分大小写、可只改主文件名保留扩展名）；改名前逐项预览，与磁盘已有项目重名 / 改后互相重名 / 名称非法都会标红并禁止执行；两阶段改名支持 A↔B 互换与只改大小写；整批可 ⌘Z 撤销 |
-| **压缩为 zip** | 单选压缩成同名 `.zip`，多选压缩成「当前文件夹名.zip」（每个项目平铺在包根）；重名自动编号「照片 2.zip」；底部忙碌卡片可取消，取消/失败不留半成品；完成后自动选中压缩包 |
-| **解压** | 右键 zip：「解压到「名称」」自动避开重名（照片 → 照片 2），包内只有一个顶层文件夹时自动消掉多余的一层嵌套；「解压到当前文件夹」先查真实文件名，遇到同名直接拒绝，绝不覆盖已有文件 |
-| **文件夹大小** | 「视图 → 计算文件夹大小」开启后，文件夹行异步统计并显示体积（计算中显示 `…`，超过 2 万文件显示 `≥`）；后台串行队列 + 按「路径 + 目录修改时间」缓存，切目录立即取消旧任务，状态栏显示进度；默认关闭（与 Finder / 资源管理器一致） |
-| **受保护位置** | 桌面 / 文稿 / 下载 / 音乐 / 影片 / 图片 / 资源库（含 iCloud 云盘）、外置卷、其他用户目录、媒体与照片资料库包，一律**不做后台递归统计**：大小显示 `—`，状态栏「N 项受保护，跳过统计」，属性面板「访问」字段说明原因。原因是递归到 `~/Music/Music` 会反复弹「想访问 Apple Music 与媒体资料库」系统框。**用户主动双击进入这些目录仍可完整浏览、复制、重命名**，图标也保持系统真实样式（见 `docs/adr/0003`） |
-| **iCloud 与网络位置** | 侧边栏「常用」自动带出 iCloud 云盘（登录了才有）；已挂载的 SMB / AFP 网络卷归入「网络」分区，本机卷仍在「设备」 |
-| **菜单栏常驻 + 全局唤起** | 菜单栏文件夹图标：打开主窗口 / 个人文件夹 / 下载 / 桌面 / 退出；`⌥⌘E` 在任何 App 里把窗口叫回来（Carbon 热键，不需要辅助功能权限）；关窗不退出，点 Dock 或热键重新唤出 |
-| **关于面板** | 苹果菜单「关于 WinExplorer」：应用图标、版本号、界面语言、全局快捷键、技术栈，可一键复制诊断信息 |
-| **中英双语** | 界面文案跟随系统语言，`-AppleLanguages "(en)"` 可整套切英文；菜单、工具栏、侧边栏、右键菜单、状态栏、各个面板全部覆盖 |
-| **未授权项** | 系统不给读的文件 / 文件夹**照常列出**，但整行变淡（42% 不透明度）、图标换成淡符号 + 橙色锁徽标，大小显示 `—`；悬停提示「未授权：需要授权后才能打开」；状态栏显示「N 项未授权」。**列目录永远不会为子项弹授权框** |
-| **授权交互** | 只有主动打开 / 预览 / 复制 / 剪切 / 删除 / 压缩未授权项，或主动进入打不开的目录时，才弹出窗口内浮层：说明是哪一项、为什么、以及「在 Finder 中显示」「选择此项目以授权…」（`NSOpenPanel` 预选该项）。授权成功即刷新，锁与淡化消失；仍失败会说明是文件权限位问题并引导去 Finder 改。桌面 / 文稿 / 下载 / 外置卷会额外给「打开系统设置」 |
-| **标签栏常驻工具栏** | Windows 11 形态：标签 chips + `+` 常驻工具栏中央（单标签也显示），`⌘T` / `⌘W` / `⌃Tab` 照旧；标签相互独立（目录 / 历史 / 选中 / 搜索），见 `docs/adr/0006` |
-| **传文件三通道** | ① 剪贴板全局共享：`⌘C / ⌘X` 在标签 A 或窗口 A，切到 B 直接 `⌘V`；② 拖文件悬停到标签 chip 0.6s 自动切过去，松手落入其当前目录；③ 拖文件到 `+` 号新建标签并放入；窗口间拖拽由 macOS 原生支持 |
-| **独立窗口** | `⌘N` 或「文件 → 新建窗口」：每窗口完全独立的标签组，可并排看两个文件夹；菜单命令永远作用于聚焦窗口（`@FocusedObject`），见 `docs/adr/0007` |
-| **右键新建** | 空白处右键「新建」子菜单：文件夹、文本文档（txt）、Markdown、CSV、RTF、Word 文档（docx）、Excel 工作表（xlsx）、PowerPoint 演示文稿（pptx）；重名自动编号、建完进行内重命名（只选中主名）、⌘Z 可撤销。Office 三件套是内嵌的 ECMA-376 最小空白包（见 `docs/adr/0004`），Word / Excel / PowerPoint / WPS 都能打开 |
-| **在终端中打开** | 空白处与文件夹项右键「在终端中打开」子菜单：iTerm / Warp（装了才显示）+ 系统 Terminal。走 LaunchServices 转交，**不跑 AppleScript、零授权弹框**；终端收到文件夹 URL 自己开新窗口并 cd |
-| 新建文件夹 | 重名自动编号「新建文件夹 2」，建完自动选中 |
-| 隐藏文件开关 | 默认隐藏 `.` 开头的文件和系统隐藏项 |
-| 右键菜单 | 打开 / 在 Finder 中显示 / 剪切 / 复制 / 粘贴到此处（文件夹）/ 复制路径 / 重命名 / 删除 / 刷新 |
-| 状态栏 | 项目数、选中项名称与大小、文件夹大小统计进度、当前完整路径 |
-| 错误处理 | 无权限或目录消失时顶部黄条提示，不崩溃、不跳走 |
-| 表头固定 | 滚动时表头常驻（pinned section header） |
+| ![light](docs/screenshots/main-light.png) | ![dark](docs/screenshots/main-dark.png) |
 
-## 快捷键
+Tree view with per-level indentation, two folders expanded, one file selected — the status bar
+shows the full path of the selection:
 
-| 快捷键 | 动作 |
-|---|---|
-| `↑` `↓` `PgUp` `PgDn` `Home` `End` | 移动选中（自动滚动） |
-| `Return` | 打开选中项（多选时逐个打开文件） |
-| `Esc` | 清空选择 |
-| `⌘A` | 全选（Command 被重映射的键盘下用 `fn`+`A` 或 `⌥`+`A` 同样生效） |
-| `⌘C` / `⌘X` / `⌘V` | 复制 / 剪切 / 粘贴（`fn`+`C`、`fn`+`X`、`fn`+`V` 同样生效） |
-| `⌘Z` / `⇧⌘Z` | 撤销 / 重做（`fn`+`Z` 同样生效） |
-| `⌘T` / `⌘W` | 新建 / 关闭标签页 |
-| `⌃Tab` / `⌃⇧Tab` | 下一个 / 上一个标签页 |
-| `空格` | 快速预览（Quick Look） |
-| `⌘1` / `⌘2` / `⌘3` | 详细信息 / 列表 / 图标视图 |
-| `⌘0` | 自动调整三列列宽（详细信息视图） |
-| `⌘L` | 编辑地址栏（Enter 前往 / Tab 补全 / Esc 取消，`fn`+`L` 同样生效） |
-| `⌘F` | 聚焦搜索框（`fn`+`F` 同样生效） |
-| `⌘I` | 显示简介（`fn`+`I` 同样生效，再按一次关闭） |
-| `⌘⌥C` | 复制选中项路径 |
-| `F2` | 重命名选中项（多选时打开批量重命名面板） |
-| `⇧⌘R` | 批量重命名（`fn`/`⌥` + ⇧R 同样生效） |
-| `⌘⌫` | 移到废纸篓 |
-| `⇧⌘⌫` | 彻底删除（需在确认层点按钮） |
-| `⌘[` / `⌘]` | 后退 / 前进 |
-| `⌘↑` | 上一级 |
-| `⇧⌘N` | 新建文件夹 |
-| `⌥⌘E` | 全局唤起窗口（任何 App 下都生效） |
-| `⌘O` | 打开选中项 |
-| `⌘R` | 刷新 |
-| `⇧⌘.` | 显示/隐藏隐藏文件 |
-| `⇧⌘H` | 回到个人文件夹 |
+![tree](docs/screenshots/tree.png)
 
-## 构建与运行
+## Requirements
+
+- macOS 14 (Sonoma) or later
+- Swift 5.9 toolchain (Xcode 15+ command line tools are enough — no Xcode project needed)
+
+## Build and run
 
 ```bash
-./scripts/build_app.sh          # release 构建，产物 build/WinExplorer.app
+git clone https://github.com/<your-name>/WinExplorer.git
+cd WinExplorer
+
+# Build a .app bundle into build/
+./scripts/build_app.sh
 open build/WinExplorer.app
-
-./scripts/make_icon.sh          # 重新生成 Support/AppIcon.icns（改图标后跑一次）
-./scripts/package_dmg.sh        # 打包 build/WinExplorer-<版本>.dmg（拖进「应用程序」）
-./scripts/package_pkg.sh        # 打包 build/WinExplorer-<版本>.pkg（装到 /Applications）
 ```
 
-DMG / PKG 都没有开发者证书签名，装到别的机器首次打开会被 Gatekeeper 拦一次，右键「打开」即可。
+Or just `swift run` for a quick launch without bundling.
 
-脚本会自动处理本机两个坑：
-
-1. `xcode-select` 指向 CommandLineTools 时，SwiftPM 的 PackageDescription 与 swiftpm 不匹配，直接 `swift build` 会报链接错误 —— 脚本切到 `/Applications/Xcode*.app` 的完整工具链。
-2. 受限环境下 SwiftPM 的 `sandbox-exec` 会 `Operation not permitted` —— 脚本传 `--disable-sandbox`。
-
-App 用 ad-hoc 签名（`codesign -s -`）。首次访问桌面/文稿会弹一次 TCC 授权；因为 cdhash 随每次重建变化，重装后可能再弹一次，这是 ad-hoc 签名的固有行为。
-
-## 开发钩子
-
-| 环境变量 | 作用 |
-|---|---|
-| `WINEXPLORER_SELFTEST=1` | 在临时目录跑 319 项逻辑自检（读取、排序、多选、键盘焦点、导航、新建、重命名、删除、剪贴板、拖放、撤销重做、地址栏、搜索、属性面板、自动刷新、标签页、收藏夹、批量重命名、压缩解压、文件夹大小、位置分区、关于面板、权限状态与授权拦截、受保护位置与跳过统计、右键新建文件与终端转交、地址栏编辑态退出、标签 / 窗口间传文件、QuickLook 预览列表、错误处理），打印 PASS/FAIL 后退出 |
-| `WINEXPLORER_START=/path` | 启动即打开指定目录，便于截图验收 |
-| `WINEXPLORER_SNAPSHOT=/tmp/x.png` | 窗口渲染完成后自截图再退出（用于无「屏幕录制」权限的环境） |
-| `WINEXPLORER_SNAPSHOT_DELAY=0.5` | 覆盖截图前的等待秒数，用来抓复制进度这类瞬时状态 |
-| `WINEXPLORER_KEYS=down,down,cmd+a` | 截图前先向窗口发按键，走真实响应链验证键盘；`menu:cmd+a` 走菜单派发，`fn+a` 复现 Command 被重映射的情况，`nav:/某个/路径` 跳目录，`sel:片段` 选中名字含该片段的所有项，`drop:/某个/路径` 点亮某个落点，`drag:/某个/路径` 模拟一次拖拽，`type:文本` 往当前焦点输入框里打字，`touch:文件名` 在当前目录造一个文件，`preview:/路径` 直接预览某个文件，`tab:new|close|next|prev` 操作标签页，`favorite:add|clear` 操作收藏夹，`rename:batch[:基名]` 打开批量重命名面板，`archive:zip|unzip|unzip-here` 压缩 / 解压当前选区，`sizes:on|off` 切换文件夹大小，`about` 打开关于面板，`open:名称` 选中并打开某项（用来看未授权项的授权浮层），`info:名称` 选中并打开属性面板，`new:txt|docx|…` 按扩展名新建文件；**截图模式一律不写用户偏好**（`Preferences.enabled = false`），验收动作不会把开关永久打开 |
-| `WINEXPLORER_APPEARANCE=dark|light` | 强制外观，用于深浅色两套截图验收（默认跟随系统） |
-| `WINEXPLORER_LANG=zh|en` | 强制界面语言（默认跟随系统）；想看完整英文界面（含系统提供的类型名）请用 `-AppleLanguages "(en)"` 启动 |
-| `WINEXPLORER_DRAG_DRYRUN=1` | 配合 `drag:` 使用：只打印"这次会拖哪些文件"，不真的进入模态拖拽会话 |
+Packaging (DMG / PKG):
 
 ```bash
-WINEXPLORER_SELFTEST=1 ./build/WinExplorer.app/Contents/MacOS/WinExplorer
+./scripts/package_dmg.sh
+./scripts/package_pkg.sh
 ```
 
-最近一次自检结果：319/319 PASS（zh / en 两种语言各跑一遍都通过）。所有用例都在临时目录内，自检期间不写系统剪贴板、不写用户偏好、不开目录监听、不注册系统快捷键。
+Both read the version from `Support/Info.plist`. The bundles are **unsigned and not
+notarized** — for distribution you'll want to sign them with your own Developer ID.
 
-## 代码结构
+## Self-tests
+
+Every build ships with an in-process test suite:
+
+```bash
+WINEXPLORER_SELFTEST=1 build/WinExplorer.app/Contents/MacOS/WinExplorer
+# → 404 assertions, ends with "SELFTEST OK"
+```
+
+Add `WINEXPLORER_LANG=en` for the English pass. The tests build a real directory tree in the
+system temp folder and exercise tree expansion, selection ranges, drag-move, trash cascade,
+archive handling and undo — no fixture files, no mocking.
+
+## Troubleshooting
+
+The app always writes a run log:
+
+```
+~/Library/Logs/WinExplorer/WinExplorer-YYYY-MM-DD.log
+```
+
+**Help → Open Run Log** jumps straight to it. The log records every directory read, tree
+expansion, context-menu build and file operation, plus a 30-second sample of
+`fd / threads / RSS / menuBuilds / window size / items / rows`. When the main thread stalls for
+more than 500 ms it dumps the last 40 events leading up to the stall.
+
+If something looks wrong, **Help → Drop a Marker in the Log** pins the current state to the
+file so you can point at the exact moment later.
+
+## Architecture
 
 ```
 Sources/WinExplorer/
-├── WinExplorerApp.swift        # @main，单窗口 Window 场景 + AppDelegate
-├── ExplorerCommands.swift      # 菜单栏与快捷键
-├── Models/
-│   ├── FileItem.swift          # 行数据模型、列定义、面包屑、侧边栏位置
-│   ├── Clipboard.swift         # 文件剪贴板（复制/剪切两种语义）
-│   ├── UndoEntry.swift         # 一条可撤销操作（标题 + undo/redo）
-│   ├── ViewPreferences.swift   # 视图模式、列宽、偏好持久化（含文件夹大小、菜单栏、热键开关）
-│   ├── AccessState.swift       # 单项访问状态（granted / denied）与授权请求
-│   ├── BatchRename.swift       # 批量重命名状态 + 预览/冲突计算（纯逻辑）
-│   └── FavoritesStore.swift    # 收藏夹（路径持久化）
-├── Services/
-│   ├── FileSystemService.swift # 目录读取 + 排序（文件夹优先、自然排序）
-│   ├── TransferService.swift   # 递归复制/移动、同卷判定、副本命名、进度与取消
-│   ├── ArchiveService.swift    # zip 压缩/解压（ditto / zip 子进程）+ 目标命名与冲突检查
-│   ├── FolderSizeService.swift # 文件夹大小后台统计（串行队列 + mtime 缓存 + 取消标记）
-│   ├── GlobalHotKey.swift      # Carbon 全局热键（⌥⌘E，免辅助功能权限）
-│   ├── StatusItemController.swift # 菜单栏常驻图标与菜单
-│   ├── AppIntegration.swift    # 启动/开关变化时装配菜单栏图标与热键
-│   ├── L10n.swift              # 中英双语（跟随系统语言，可用环境变量强制）
-│   ├── PermissionService.swift # 只读权限探测、权限错误识别、授权面板与系统设置入口
-│   ├── ProtectedPaths.swift    # TCC 保护位置判定（后台递归跳过 / 图标规避，纯字符串比较）
-│   ├── DocumentTemplates.swift # 右键新建的初始内容（内嵌最小 OOXML 模板 + RTF 生成）
-│   ├── TerminalService.swift   # 「在终端中打开」的终端探测与 LaunchServices 转交
-│   ├── ClipboardStore（Models/Clipboard.swift） # 应用级共享剪贴板（跨标签 / 跨窗口 ⌘C→⌘V）
-│   ├── DragSupport.swift       # 行探针命中 + AppKit 拖拽会话 + onDrop 解析
-│   ├── DirectoryWatcher.swift  # vnode 事件源 + 防抖，外部改动自动刷新
-│   ├── FileInfoService.swift   # 属性数据 + 文件夹递归统计
-│   ├── QuickLookController.swift # QLPreviewPanel 的 dataSource/delegate
-│   ├── ShortcutMonitor.swift   # 在菜单之前接管 ⌘Z / ⌘I / ⌘F（SwiftUI 会先吃掉它们）
-│   ├── IconProvider.swift      # 系统图标缓存
-│   ├── SelfTest.swift          # 无界面逻辑自检
-│   └── SnapshotSupport.swift   # 无权限环境下的自截图 + 按键注入
-├── ViewModels/BrowserModel.swift  # 导航栈、排序、选择、剪贴板、文件操作
-└── Views/
-    ├── RootView.swift          # 标签栏 + 当前标签
-    ├── TabBarView.swift        # 标签栏（每个标签自己观察自己的 model）
-    ├── BrowserView.swift       # NavigationSplitView + 工具栏 + 错误条 + 进度卡
-    ├── SidebarView.swift
-    ├── PathBar.swift           # 面包屑 + 可编辑路径（⌘L）
-    ├── FileListView.swift      # 共用列骨架 FileListLayout（表头/行严格对齐）+ 右键菜单
-    ├── TransferProgressView.swift  # 复制/移动进度卡片（也用于压缩解压的忙碌态）
-    ├── RenameField.swift       # 行内重命名输入框
-    ├── BatchRenameView.swift   # 批量重命名面板浮层（序号命名 / 查找替换 + 逐项预览）
-    ├── AboutPanelView.swift    # 关于面板浮层
-    ├── AccessRequestView.swift # 「需要授权才能访问」浮层（只对单个项目）
-    ├── FileItemIcon.swift      # 行图标：可读用系统图标，未授权用淡符号 + 锁徽标
-    ├── PathField.swift         # 地址栏输入框（Enter/Tab/Esc）
-    ├── SearchField.swift       # 地址栏右侧搜索框（NSSearchField）
-    ├── InfoPanelView.swift     # 属性面板浮层
-    ├── DeleteConfirmView.swift # 彻底删除确认浮层
-    └── StatusBar.swift
+├── Models/           FileItem, TreeRow, ColumnWidths, undo entries
+├── Services/         filesystem, icons, archive, transfer, run log, permissions
+├── ViewModels/       BrowserModel (per tab), TabsModel, FolderSizeCoordinator
+└── Views/            list, sidebar, toolbar, panels, dialogs
 ```
 
-## 已知限制（当前阶段）
+Two decisions shape most of the code:
 
-- 彻底删除（⇧⌘⌫）不可撤销，这是刻意的——它本来就不该有后悔药
-- 复制大目录时如果强退 App，目标目录会留下已完成的部分文件（进度卡上的「取消」会清理干净）
-- 标签页不跨启动恢复（重启只有一个标签，回到上次目录）；标签栏在只有一个标签时隐藏
-- 收藏夹存的是路径，目录被移动/改名后条目失效（点开会提示找不到）
-- Quick Look 面板里不能直接操作文件（重命名/删除），只是预览
-- 图标视图的图标尺寸固定（104×84 格），还不支持滑块缩放
-- 搜索只在当前文件夹内按文件名过滤，不递归子目录、不搜内容（全盘搜索请用 Spotlight）
-- 属性面板只读，不能在那里改权限或名称
-- 压缩 / 解压只支持 zip（rar / 7z 请交给系统或第三方工具）；大目录没有细粒度进度，只有「处理中…」忙碌条
-- 解压到当前文件夹遇到同名项目会整批拒绝，不做「全部替换 / 跳过」的选择对话框
-- 批量重命名的查找替换是字面量替换，不支持正则与编号通配符
-- 地址栏只接受绝对路径和 `~`，不解析相对路径，也没有历史下拉
-- Office 模板是「最小空白包」：Word 打开是一张空页、Excel 是空 Sheet1、PowerPoint 是一张空幻灯片；要表头/封面请存成自己的模板再复制。没做 Pages / Numbers / Keynote（私有格式无法生成最小文件）
-- 「在终端中打开」只探测 Terminal / iTerm / Warp 三个；终端列表是数据驱动，要加 kitty、Alacritty 等改 `TerminalService.available` 即可
-- 「计算文件夹大小」对受保护位置一律跳过：在家目录里看不到「音乐 / 影片 / 图片 / 桌面 / 文稿 / 下载」的体积，在 iCloud 云盘里也看不到子目录体积。这是为了避免系统授权弹框，不是算不出来；用户主动进入目录后浏览功能完全正常
-- 菜单栏常驻模式下的 ⌥⌘E / Dock 点击会**开一个新窗口**（`openWindow(id:)`），不聚焦已有窗口
-- 首次**主动进入**桌面 / 文稿 / 下载 / 外置卷时，系统自己仍会弹一次 TCC 授权框 —— 那是系统行为，应用无法预先知道授权结果或阻止它
-- 权限这一层是"只读探测 + 显式确认"，不是沙盒授权：本 App 非沙盒（要浏览任意路径），所以「选择此项目以授权」**不能**改变文件本身的 POSIX 权限位，也不能替代 macOS 的隐私（TCC）授权；TCC 受保护的位置需要在系统设置里放开
-- TCC 的弹窗粒度是目录，由系统控制：首次读桌面 / 文稿 / 下载 / 外置卷时仍会出现一次系统授权框（应用无法避免，也无法预先知道结果）
-- 地址栏折叠按「段数 > 5」判定，不是按实际像素宽度量出来的；窗口极窄时可能仍显拥挤（`…` 菜单里不丢信息）
-- 地址栏仍在工具栏下方独占一行；Win11 是把它与前进/后退并排放进同一条工具栏
-- 图标同步加载，超大目录（数千项）会有可感知的打开延迟
-- 文件夹大小默认关闭：开启后按当前目录的文件夹逐个统计，结果缓存到目录修改时间变化为止；「按大小」排序仍按文件真实大小，不把算出来的文件夹体积算进去
-- 网络卷（SMB/AFP）读取走系统同步 API，共享盘掉线时打开目录可能卡顿几秒
-- 本地化覆盖所有界面文案；文件的「类型」列由系统 UTType 提供，跟随进程语言而不是应用内开关
-- DMG / PKG 未签名，也没有公证（无开发者账号）
-- 「应用程序」目录里的 `.app` 按普通文件对待，没有应用专属信息（版本、签名等）
+1. **There is no in-memory tree.** The disk is the tree. The app keeps only "which folders are
+   expanded" plus a lazily filled cache of their children, then flattens that into rows for the
+   list. Expanding a folder re-reads it, so what you see is what's on disk.
+2. **Operations act on the visible rows, not on the current directory.** Everything that touches
+   a selection goes through one array that mirrors what's on screen, so a file selected three
+   levels deep behaves exactly like one in the current folder.
 
-## 路线图
+Both are documented in the ADRs, along with the bugs that motivated them.
 
-> 完整的分级待办（26 项）、每项验收标准与迭代计划见 **[ROADMAP.md](ROADMAP.md)**，做完一项勾一项。
+## Known limitations
 
-### Phase 2 · 基本操作闭环
-1. ✅ 多选：⌘ 点选、Shift 连选、⌘A；选中项在状态栏汇总大小
-2. ✅ 键盘导航：↑↓ 移动选中、Return 打开、PgUp/PgDn、Home/End
-3. ✅ 行内重命名：F2 / Return，扩展名默认不被选中
-4. ✅ 剪贴板：⌘C / ⌘X / ⌘V，同卷 `moveItem` 瞬时移动，复制与跨卷带进度、可取消
-5. ✅ 空白区右键菜单：新建文件夹 / 粘贴 / 全选 / 刷新 / 显示隐藏文件
-6. ✅ 拖拽：行拖到文件夹/空白处/侧边栏/面包屑；同卷移动、跨卷复制、⌥ 强制复制、⌘ 强制移动
-7. ✅ 撤销栈（⌘Z）：重命名、移动、复制、新建、移入废纸篓都可回滚
+- **DMG / PKG are unsigned and unnotarized.** Gatekeeper will complain on other machines:
+  right-click → Open, or `xattr -dr com.apple.quarantine /Applications/WinExplorer.app`.
+- **No Quick Look editing, no Finder tags, no iCloud Drive special-casing** — `.app` bundles are
+  treated as ordinary files, which is the deliberate scope for now.
+- **Tree mode only applies to the detail list.** The compact and icon views stay flat.
+- **Searching filters the current folder only** (no recursive search), and drops to a flat list
+  while a query is active.
+- **The tree's row height is a constant** tied to the current toolbar style; a very different
+  toolbar would need that number revisited.
 
-### Phase 3 · 浏览体验对齐 Explorer
-- ✅ 列宽拖拽并记住；视图切换（详细信息 / 列表 / 图标）
-- ✅ 地址栏可编辑（⌘L 手输路径 + Tab 自动补全）
-- 搜索框：当前目录即时过滤，回车转 Spotlight 全盘
-- 后退/前进历史下拉；✅ 标签页；双窗格
-- ✅ UserDefaults 记住排序方式、隐藏文件开关、视图模式、列宽、上次目录
-- 状态栏显示磁盘剩余空间
+## License
 
-### Phase 4 · 系统集成
-- ✅ QuickLook（QLPreviewPanel）、✅ ⌘I 属性面板、✅ 压缩 / 解压（zip）、打开方式菜单
-- ✅ 侧边栏收藏夹自定义（拖入即收藏）
-- ✅ 全局快捷键唤出（⌥⌘E）；✅ 菜单栏常驻图标
-- ✅ 打包 `.pkg` / DMG、✅ App 图标、✅ 关于窗口；开机自启（LaunchAgent）仍未做
+MIT — see [LICENSE](LICENSE).
 
-### Phase 5 · 进阶
-- ✅ 批量重命名、✅ 目录大小异步统计、✅ 网络位置与挂载卷；Total Commander 式双栏仍未做
+Third-party code: none. The app icon is drawn at build time by `scripts/make_icon.swift`.
