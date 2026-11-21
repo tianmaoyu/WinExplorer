@@ -17,8 +17,20 @@ enum TerminalService {
     /// 系统自带 Terminal 的标准位置
     private static let systemTerminal = "/System/Applications/Utilities/Terminal.app"
 
+    /// 探测结果缓存。右键菜单构建时会读它，原来每次都要 stat 三四个路径 ——
+    /// 菜单路径上不该有任何磁盘 IO（adr/0016）。应用一般不会在运行中装卸，
+    /// 进程生命周期内缓存一次足够。
+    private static var cached: [App]?
+
     /// 本机可用的终端，按优先级排列；Terminal 永远兜底（系统自带）
     static var available: [App] {
+        if let cached { return cached }
+        let detected = detect()
+        cached = detected
+        return detected
+    }
+
+    private static func detect() -> [App] {
         let fm = FileManager.default
         var result: [App] = []
 

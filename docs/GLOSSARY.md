@@ -92,3 +92,7 @@
 | **加载态** | 目录正在后台读取时状态栏的小转圈与「正在读取…」 | `BrowserModel.isLoadingDirectory` |
 | **降级项** | 属性读不出来（TCC/权限/卷异常）时的占位行：保留文件名、标为未授权、类型显示「无法读取」，绝不让行静默消失 | `FileSystemService.degradedItem`（adr/0014） |
 | **读取看门狗** | 每次目录读取起的 5s 定时器：超时自动重试一次，再超时给出错误，避免永远停在空列表+转圈 | `BrowserModel.startLoadWatchdog` |
+| **运行日志** | 落盘到 `~/Library/Logs/WinExplorer/` 的现场记录：关键路径打点、主线程卡顿 dump、每 30s 资源采样；「帮助 → 打开运行日志」直达 | `RunLog`（adr/0016） |
+| **菜单构建** | SwiftUI 会为每一行**预先**构建整套右键菜单（不是右键时才建），所以菜单路径上不能有任何磁盘 / IPC 操作 | `FileListView.contextMenu` |
+| **主线程卡顿检测** | 后台每 100ms 投一次心跳，超时即记录并 dump 卡住前最近 40 条事件 | `RunLog.startHangDetection` |
+| **菜单构建强度** | 资源采样里的 `menuBuilds`：一轮采样内列表重建次数 × 行数。异常高说明视图在反复全量刷新 | `RunLog.recordMenuBuild` |

@@ -21,6 +21,19 @@ struct ExplorerCommands: Commands {
             }
         }
 
+        // 偶发问题排查入口：运行日志落在 ~/Library/Logs/WinExplorer/
+        CommandGroup(replacing: .help) {
+            Button(L("打开运行日志", "Open Run Log")) {
+                RunLog.shared.revealInFinder()
+            }
+            Button(L("记录一条现场标记", "Drop a Marker in the Log")) {
+                // 用户遇到诡异现象时点一下：把当前状态钉进日志，
+                // 事后往回翻能定位到「就是这一刻」
+                let sample = RunLog.resources()
+                RunLog.shared.log(.user, "★ 用户标记 \\(model.currentURL.path) items=\\(model.items.count) selection=\\(model.selection.count) loading=\\(model.isLoadingDirectory) fd=\\(sample.fd) threads=\\(sample.threads) rss=\\(sample.rssMB)MB")
+            }
+        }
+
         CommandGroup(replacing: .undoRedo) {
             Button(model.undoTitle.map { "\(L("撤销", "Undo")) \($0)" } ?? L("撤销", "Undo")) {
                 // 正在重命名时，⌘Z 应该撤销文字编辑

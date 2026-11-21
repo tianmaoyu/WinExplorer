@@ -149,7 +149,9 @@ enum TransferService {
 
         func report(_ name: String, force: Bool = false) {
             let now = Date()
-            guard force || now.timeIntervalSince(lastReport) > 0.05 else { return }
+            // 200ms 一次：每一条进度都会让整个文件列表重建（含每行右键菜单），
+            // 50ms 的节奏在大列表上等于每秒上千次菜单构建（adr/0016）
+            guard force || now.timeIntervalSince(lastReport) > 0.2 else { return }
             lastReport = now
             let snapshot = TransferProgress(
                 title: title,

@@ -42,6 +42,8 @@ final class BrowserModel: ObservableObject {
     @Published private(set) var errorMessage: String?
     /// 目录正在后台读取（状态栏显示小转圈，避免"点了没反应"的错觉）
     @Published private(set) var isLoadingDirectory = false
+    /// 目录监听触发的自动刷新正在进行（同一时刻只允许一次）
+    private var isRefreshing = false
     @Published var flash: String?
 
     /// 多选集合
@@ -302,6 +304,13 @@ final class BrowserModel: ObservableObject {
     private var flashWorkItem: DispatchWorkItem?
     private var cachedPasteboardChangeCount = -1
     private var cachedPasteboardURLs: [URL] = []
+    /// 上次真正问系统剪贴板的时间。
+    /// 右键菜单是**逐行预先构建**的（SwiftUI 的 contextMenu 会立即求值），
+    /// 一帧内可能问几百次 `pasteboard.changeCount` —— 那是 XPC，会把主线程拖死。
+    /// 所以这里限速：250ms 内只问一次，其余读缓存（adr/0016）。
+    private var lastPasteboardProbe = Date.distantPast
+    /// 剪贴板里是否有可粘贴的文件（canPaste 只读这个）
+    private var pasteboardHasFiles = false
 
     /// 目录监听（外部新增/删除文件时自动刷新）
     private let directoryWatcher = DirectoryWatcher()
@@ -368,7 +377,16 @@ final class BrowserModel: ObservableObject {
     /// 有剪贴板内容或系统剪贴板里有文件，才能粘贴
     var canPaste: Bool {
         if clipboard != nil { return true }
-        return !systemPasteboardFileURLs().isEmpty
+        probePasteboardIfNeeded()
+        return pasteboardHasFiles
+    }
+
+    /// 限速探测系统剪贴板。菜单逐行构建时绝大多数调用会在这里直接返回。
+    private func probePasteboardIfNeeded() {
+        let now = Date()
+        guard now.timeIntervalSince(lastPasteboardProbe) >= 0.25 else { return }
+        lastPasteboardProbe = now
+        pasteboardHasFiles = !systemPasteboardFileURLs().isEmpty
     }
 
     /// 有复制/移动任务在跑
@@ -623,6 +641,7 @@ final class BrowserModel: ObservableObject {
         loadGeneration += 1
         let generation = loadGeneration
         isLoadingDirectory = true
+        RunLog.shared.log(.load, "开始 gen=\(generation) \(standardized.path) sync=\(Self.loadsDirectorySynchronously)")
 
         // 自检：同步读，保持「构造完 / navigate 完立刻断言」的写法
         if Self.loadsDirectorySynchronously {
@@ -634,7 +653,16 @@ final class BrowserModel: ObservableObject {
 
         // 目录读取放到后台：网络卷断线、几万项目录都不该冻住窗口
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let started = Date()
             let result = Result { try FileSystemService.contents(of: standardized) }
+            let elapsed = Date().timeIntervalSince(started)
+            // 后台读得慢也要留痕：网络卷/大目录的症状会先出现在这里
+            if elapsed > 0.5 {
+                RunLog.shared.log(.load, "后台读取耗时 \(Int(elapsed * 1000))ms \(standardized.path)")
+            }
+            if case .failure(let error) = result {
+                RunLog.shared.log(.load, "读取失败 \(standardized.path) err=\(error.localizedDescription)")
+            }
             DispatchQueue.main.async {
                 self?.applyLoad(result, url: standardized, recordHistory: recordHistory,
                                 directoryChanged: directoryChanged, generation: generation)
@@ -653,8 +681,10 @@ final class BrowserModel: ObservableObject {
             guard let self, self.isLoadingDirectory, generation == self.loadGeneration else { return }
             self.loadAttempts += 1
             if self.loadAttempts <= 1 {
+                RunLog.shared.log(.load, "看门狗超时，自动重试一次 gen=\(generation) \(url.path)")
                 self.load(directory: url, recordHistory: false)
             } else {
+                RunLog.shared.log(.load, "看门狗判定超时 gen=\(generation) \(url.path)")
                 self.loadAttempts = 0
                 self.isLoadingDirectory = false
                 self.errorMessage = L(
@@ -676,7 +706,7 @@ final class BrowserModel: ObservableObject {
         generation: Int
     ) {
         guard generation == loadGeneration else {
-            logLoad("丢弃过期结果", url: url, count: nil, generation: generation)
+            RunLog.shared.log(.load, "丢弃过期结果 gen=\(generation)/\(loadGeneration) \(url.path)")
             return
         }
         isLoadingDirectory = false
@@ -686,7 +716,7 @@ final class BrowserModel: ObservableObject {
 
         switch result {
         case .success(let loaded):
-            logLoad("应用结果", url: url, count: loaded.count, generation: generation)
+            RunLog.shared.log(.load, "应用 gen=\(generation)/\(loadGeneration) \(url.path) items=\(loaded.count)")
             if recordHistory, url != currentURL {
                 backStack.append(currentURL)
                 forwardStack.removeAll()
@@ -711,6 +741,8 @@ final class BrowserModel: ObservableObject {
             applySortAndFilter()
             refreshFolderSizes()
             watchDirectory(url)
+            // 预热「打开方式」候选：右键时只读缓存，不会卡住菜单（adr/0016）
+            prefetchOpenWithForVisibleItems()
             // 压缩/解压完成后要选中新产物：那时列表可能还没读完，读完后补一次
             applyPendingReveal()
         case .failure(let error):
@@ -723,13 +755,6 @@ final class BrowserModel: ObservableObject {
                 errorMessage = L("无法打开「\(url.lastPathComponent)」：\(error.localizedDescription)", "Can’t open “\(url.lastPathComponent)”: \(error.localizedDescription)")
             }
         }
-    }
-
-    /// 目录读取诊断日志：`WINEXPLORER_LOAD_DEBUG=1` 时打印，偶发空白问题时用得上
-    private func logLoad(_ action: String, url: URL, count: Int?, generation: Int) {
-        guard ProcessInfo.processInfo.environment["WINEXPLORER_LOAD_DEBUG"] == "1" else { return }
-        let items = count.map { "items=\($0)" } ?? "items=—"
-        print("[Load] gen=\(generation)/\(loadGeneration) \(action) \(url.path) \(items)")
     }
 
     /// 排序结果缓存：过滤（隐藏项 / 搜索词）不改变相对顺序，所以
@@ -797,6 +822,7 @@ final class BrowserModel: ObservableObject {
     private func watchDirectory(_ url: URL) {
         guard Self.watchesFileSystem else { return }
         directoryWatcher.watch(url)
+        RunLog.shared.log(.watch, "监听 \(url.path) fd=\(RunLog.resources().fd)")
     }
 
     private func handleDirectoryChange() {
@@ -813,9 +839,54 @@ final class BrowserModel: ObservableObject {
     }
 
     /// 外部变更后重新读目录：保留选择与焦点，只有内容真的变了才更新（避免无谓刷新）
+    /// 目录监听触发的自动刷新：同样放到后台读（adr/0016）。
+    ///
+    /// 这里以前是主线程同步读。下载目录、编译产物目录会持续触发 vnode 事件，
+    /// 每次都在主线程读几百项 —— 叠加右键菜单里的 LaunchServices 查询，
+    /// 主线程被反复排队，表现出来就是「菜单不弹、刷新后一片空白」。
     func refreshFromDisk() {
+        // 正在刷就跳过：vnode 已经在 0.25s 防抖里合并过一次，
+        // 这里再挡一层，避免事件密集时排出一长串后台读
+        guard !isRefreshing else {
+            RunLog.shared.note(.watch, "已在刷新，跳过本次触发")
+            return
+        }
+        // 自检：同步读，保持「改完文件立刻断言」的写法（与 load 的开关共用语义）
+        if Self.loadsDirectorySynchronously {
+            let result = Result { try FileSystemService.contents(of: currentURL) }
+            applyRefresh(result, url: currentURL, generation: loadGeneration)
+            return
+        }
+
+        isRefreshing = true
+
+        let url = currentURL
+        let generation = loadGeneration
+        RunLog.shared.note(.watch, "自动刷新开始 gen=\(generation) \(url.path)")
+
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let started = Date()
+            let result = Result { try FileSystemService.contents(of: url) }
+            let elapsed = Date().timeIntervalSince(started)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.isRefreshing = false
+                RunLog.shared.log(.watch, "自动刷新完成 \(Int(elapsed * 1000))ms gen=\(generation) \(url.path)")
+                self.applyRefresh(result, url: url, generation: generation)
+            }
+        }
+    }
+
+    private func applyRefresh(_ result: Result<[FileItem], Error>, url: URL, generation: Int) {
+        // 期间用户切走了目录 / 又发生了新的一次加载：这次刷新结果作废
+        guard generation == loadGeneration,
+              url.standardizedFileURL == currentURL.standardizedFileURL else {
+            RunLog.shared.note(.watch, "自动刷新结果作废 gen=\(generation)/\(loadGeneration)")
+            return
+        }
+
         do {
-            let loaded = try FileSystemService.contents(of: currentURL)
+            let loaded = try result.get()
             let signature = Self.signature(of: loaded)
             guard signature != directorySignature else { return }
             directorySignature = signature
@@ -823,7 +894,9 @@ final class BrowserModel: ObservableObject {
             invalidateSortCache()
             applySortAndFilter()
             refreshFolderSizes()
+            prefetchOpenWithForVisibleItems()
         } catch {
+            RunLog.shared.log(.watch, "自动刷新读取失败 \(url.path) err=\(error.localizedDescription)")
             if PermissionService.isPermissionDenied(error) {
                 // 当前目录被收走了：已加载的行一律按未授权显示，再给一次授权入口
                 allItems = allItems.map {
@@ -1116,22 +1189,88 @@ final class BrowserModel: ObservableObject {
 
     // MARK: - 打开方式（adr/0010）
 
-    /// 候选应用缓存（按扩展名）。右键菜单每次渲染都会问一次，
-    /// `urlsForApplications` 是同步 LaunchServices 查询，不缓存会明显拖慢菜单弹出。
+    /// 候选应用缓存（按类型）。右键菜单构建时**只读缓存**，绝不现场查 LaunchServices
+    /// —— `urlsForApplications` 是同步查询，系统 LS 数据库繁忙时会阻塞几秒，
+    /// 表现就是「右键菜单点了不出来」（adr/0016）。
     private var openWithCache: [String: [OpenWithService.App]] = [:]
+    /// 默认应用的缓存。用枚举区分「没查过」和「查过但没有默认应用」
+    private enum CachedDefaultApp { case none, app(OpenWithService.App) }
+    private var defaultAppCache: [String: CachedDefaultApp] = [:]
+    /// 正在后台查询的类型（避免重复发起）
+    private var openWithPending: Set<String> = []
 
-    /// 「打开方式」子菜单要列出的应用：按文件类型查系统里能打开它的应用
-    func openWithCandidates(for item: FileItem) -> [OpenWithService.App] {
-        let key = item.url.pathExtension.lowercased()
-        if let cached = openWithCache[key] { return cached }
-        let apps = OpenWithService.applications(for: item.url)
-        openWithCache[key] = apps
-        return apps
+    /// 缓存键：文件夹和文件分开（两者的候选应用不同）
+    private func openWithKey(for item: FileItem) -> String {
+        item.isFolderLike ? ":dir" : item.url.pathExtension.lowercased()
     }
 
-    /// 当前默认打开方式（双击会用谁）
+    /// 「打开方式」子菜单要列出的应用：**只读缓存**，未命中返回空并触发后台预热
+    func openWithCandidates(for item: FileItem) -> [OpenWithService.App] {
+        let key = openWithKey(for: item)
+        if let cached = openWithCache[key] { return cached }
+        prefetchOpenWith(for: item)
+        return []
+    }
+
+    /// 自检用：清掉「打开方式」缓存，验证首次菜单构建不会阻塞
+    func resetOpenWithCacheForTesting() {
+        openWithCache.removeAll()
+        defaultAppCache.removeAll()
+        openWithPending.removeAll()
+    }
+
+    /// 候选应用是否还在后台查询（菜单里据此显示「正在读取…」而不是「没有应用」）
+    func isOpenWithLoading(for item: FileItem) -> Bool {
+        openWithPending.contains(openWithKey(for: item))
+    }
+
+    /// 当前默认打开方式（双击会用谁）：同样只读缓存
     func defaultOpenWithApp(for item: FileItem) -> OpenWithService.App? {
-        OpenWithService.defaultApplication(for: item.url)
+        let key = openWithKey(for: item)
+        if let cached = defaultAppCache[key] {
+            if case .app(let app) = cached { return app }
+            return nil
+        }
+        prefetchOpenWith(for: item)
+        return nil
+    }
+
+    /// 后台查 LaunchServices，查完回主线程写缓存并通知菜单重绘
+    private func prefetchOpenWith(for item: FileItem) {
+        let key = openWithKey(for: item)
+        guard openWithCache[key] == nil, !openWithPending.contains(key) else { return }
+        openWithPending.insert(key)
+        let url = item.url
+
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let apps = RunLog.shared.timed(.menu, "LS 候选应用 key=\(key)", threshold: 0.2) {
+                OpenWithService.applications(for: url)
+            }
+            let defaultApp = RunLog.shared.timed(.menu, "LS 默认应用 key=\(key)", threshold: 0.2) {
+                OpenWithService.defaultApplication(for: url)
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.openWithPending.remove(key)
+                self.openWithCache[key] = apps
+                self.defaultAppCache[key] = defaultApp.map(CachedDefaultApp.app) ?? .none
+                // 让菜单在下次展开时拿到候选（不主动弹菜单，这只是数据变化）
+                self.objectWillChange.send()
+            }
+        }
+    }
+
+    /// 目录加载完后，预热可见项的「打开方式」（最多 6 种类型），
+    /// 这样第一次右键基本都能直接命中缓存
+    private func prefetchOpenWithForVisibleItems() {
+        var keys = Set<String>()
+        for item in items.prefix(200) {
+            let key = openWithKey(for: item)
+            guard !keys.contains(key) else { continue }
+            keys.insert(key)
+            if keys.count > 6 { break }
+            prefetchOpenWith(for: item)
+        }
     }
 
     /// 用指定应用**一次性**打开：多选时打开全部选中项，不改系统默认应用
@@ -1688,6 +1827,7 @@ final class BrowserModel: ObservableObject {
                 options: [.urlReadingFileURLsOnly: true]
             ) as? [URL] ?? []
             cachedPasteboardURLs = objects.filter(\.isFileURL)
+            pasteboardHasFiles = !cachedPasteboardURLs.isEmpty
         }
         return cachedPasteboardURLs
     }

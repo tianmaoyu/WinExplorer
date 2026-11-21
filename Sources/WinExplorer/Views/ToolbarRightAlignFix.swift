@@ -19,14 +19,22 @@ struct ToolbarRightAlignFix: NSViewRepresentable {
     func makeNSView(context: Context) -> InstallerView { InstallerView() }
 
     func updateNSView(_ nsView: InstallerView, context: Context) {
-        // SwiftUI 重新渲染时也尝试补一次（幂等，已有就跳过）
-        nsView.scheduleInstall()
+        // SwiftUI 重绘非常频繁（每次列表变化都会走这里）。如果每次都去校验工具栏，
+        // 插入 item → 触发 willAddItem → 再校验，会形成「插入风暴」：
+        // 工具栏反复重排，极端情况下整窗内容进入「存在但不绘制」的状态
+        //（1.4.2 就踩过一次，全窗口截图 chrome 全空）。所以这里必须节流。
+        nsView.scheduleInstallThrottled()
     }
 
     final class InstallerView: NSView {
         private weak var observedWindow: NSWindow?
         private var pending = false
         private var verifying = false
+        /// 上一次真正校验工具栏的时间（updateNSView 的节流）
+        private var lastThrottledCheck = Date.distantPast
+        /// 插入计数：用于识别「反复被冲掉 → 反复插入」的风暴
+        private var insertCount = 0
+        private var insertWindowStart = Date()
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
@@ -58,6 +66,14 @@ struct ToolbarRightAlignFix: NSViewRepresentable {
 
         deinit { NotificationCenter.default.removeObserver(self) }
 
+        /// SwiftUI 重绘触发时用这个：最多 2 秒校验一次，避免插入风暴
+        func scheduleInstallThrottled() {
+            let now = Date()
+            guard now.timeIntervalSince(lastThrottledCheck) >= 2 else { return }
+            lastThrottledCheck = now
+            scheduleInstall()
+        }
+
         /// 合并同一轮 runloop 内的多次触发，避免重复插入
         @objc func scheduleInstall() {
             guard !pending else { return }
@@ -83,6 +99,19 @@ struct ToolbarRightAlignFix: NSViewRepresentable {
             else { return }
             let index = min(separator + 2, toolbar.items.count)
             toolbar.insertItem(withItemIdentifier: .flexibleSpace, at: index)
+
+            // 记录插入频率：一分钟内反复插入说明 SwiftUI 在不停重建工具栏，
+            // 这正是「跑一会儿界面就不正常」的高危信号，必须留痕
+            insertCount += 1
+            let elapsed = Date().timeIntervalSince(insertWindowStart)
+            if elapsed >= 60 {
+                if insertCount >= 6 {
+                    RunLog.shared.log(.perf, "⚠️ 工具栏弹性空白一分钟内插入了 \(insertCount) 次（SwiftUI 在反复重建）")
+                }
+                insertCount = 0
+                insertWindowStart = Date()
+            }
+            RunLog.shared.note(.perf, "插入弹性空白 at=\(index) items=\(toolbar.items.count)")
             dumpLayout()
 
             // 插入是异步生效的，稍后再校验一次：被 SwiftUI 冲掉就立刻补回

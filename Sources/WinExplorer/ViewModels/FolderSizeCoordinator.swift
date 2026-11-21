@@ -16,10 +16,18 @@ final class FolderSizeCoordinator: ObservableObject {
     /// 单次最多排队的目录数：一次冲进太多目录只会让磁盘队列排长队
     private let maxPending = 200
 
+    /// 待发布的结果。**不能算完一个就发一次 `@Published`**：
+    /// 每次发布都会让整个文件列表重建（连带每一行预先构建整套右键菜单），
+    /// 200 个文件夹就是 200 次全量重建 × 行数，主线程直接被拖死。
+    /// 所以攒起来，每 150ms 一次批量发布（adr/0016）。
+    private var pendingSizes: [String: FolderSizeService.Size] = [:]
+    private var flushScheduled = false
+
     /// 重排统计任务。`enabled == false`（视图没开「计算文件夹大小」）时只清空结果。
     /// `synchronously` 仅供自检：缓存校验与统计都同步完成，方便断言。
     func refresh(folders: [URL], enabled: Bool, synchronously: Bool = false) {
         job?.cancel()
+        pendingSizes.removeAll()
         let job = FolderSizeJob()
         self.job = job
 
@@ -48,6 +56,7 @@ final class FolderSizeCoordinator: ObservableObject {
     func clear() {
         job?.cancel()
         job = nil
+        pendingSizes.removeAll()
         sizes = [:]
     }
 
@@ -79,7 +88,26 @@ final class FolderSizeCoordinator: ObservableObject {
         FolderSizeService.shared.compute(Array(pending), job: job) { [weak self] url, size in
             guard let self, !job.isCancelled else { return }
             FolderSizeService.shared.store(size, for: url)
-            self.sizes[url.standardizedFileURL.path] = size
+            self.enqueue(size, for: url)
         }
+    }
+
+    /// 攒一小会儿再一次性发布，把「每个文件夹一次刷新」压成「每 150ms 一次」
+    private func enqueue(_ size: FolderSizeService.Size, for url: URL) {
+        pendingSizes[url.standardizedFileURL.path] = size
+        guard !flushScheduled else { return }
+        flushScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.flush()
+        }
+    }
+
+    private func flush() {
+        flushScheduled = false
+        guard !pendingSizes.isEmpty else { return }
+        var merged = sizes
+        for (key, size) in pendingSizes { merged[key] = size }
+        pendingSizes.removeAll()
+        sizes = merged
     }
 }

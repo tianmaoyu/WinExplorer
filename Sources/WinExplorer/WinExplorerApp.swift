@@ -43,9 +43,15 @@ private struct WindowRootView: View {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // 运行日志先起来：后面任何一步出问题都要有记录（adr/0015）
+        RunLog.shared.start()
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         AppIntegration.apply()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        RunLog.shared.log(.app, "退出")
     }
 
     /// 开启菜单栏常驻时，关窗不退出，靠菜单栏图标或 ⌥⌘E 叫回来

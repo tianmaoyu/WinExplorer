@@ -372,7 +372,11 @@ struct FileListView: View {
 
     @ViewBuilder
     private func contextMenu(for item: FileItem) -> some View {
+        // 菜单构建在主线程：这里只允许读内存缓存和常量（adr/0016）。
+        // 任何同步磁盘 / LaunchServices 查询都会让菜单「点了不出来」。
         let inSelection = model.selection.contains(item.url)
+        // 记一笔：卡顿 dump 里能看到「最后一个动作是构建 X 的右键菜单」
+        let _ = RunLog.shared.recordMenuBuild()
 
         Button(L("打开", "Open")) {
             if inSelection {
@@ -387,7 +391,10 @@ struct FileListView: View {
             let defaultApp = model.defaultOpenWithApp(for: item)
 
             if candidates.isEmpty {
-                Text(L("没有可用的应用", "No apps available"))
+                // 候选是后台查的：第一次右键可能还没回来，说清楚而不是骗用户「没有」
+                Text(model.isOpenWithLoading(for: item)
+                     ? L("正在读取候选应用…", "Loading apps…")
+                     : L("没有可用的应用", "No apps available"))
             } else {
                 ForEach(candidates) { app in
                     Button(app.id == defaultApp?.id
@@ -504,6 +511,7 @@ struct FileListView: View {
     /// 空白区域右键菜单（Windows 在文件夹空白处右键的效果）
     @ViewBuilder
     private var emptyAreaMenu: some View {
+        let _ = RunLog.shared.recordMenuBuild()
         Menu(L("新建", "New")) {
             Button(L("文件夹", "Folder")) {
                 model.createFolder()

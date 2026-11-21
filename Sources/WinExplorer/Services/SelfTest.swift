@@ -1468,6 +1468,34 @@ enum SelfTest {
                                                  ascending: model.sortAscending).map(\.name)
         check("排序缓存：过滤来回归位后顺序不变", namesAfterSearch == namesDirect)
 
+        // MARK: 右键菜单路径（adr/0016）
+        // SwiftUI 会为每一行预先构建整套右键菜单，所以菜单路径上不能有任何
+        // 同步磁盘 / LaunchServices 查询。这里验证「打开方式」确实只读缓存。
+        if let menuItem = FileSystemService.makeItem(for: txtA) {
+            model.resetOpenWithCacheForTesting()
+            let coldCandidates = model.openWithCandidates(for: menuItem)
+            check("打开方式：菜单首次只读缓存，不现场查 LaunchServices",
+                  coldCandidates.isEmpty && model.isOpenWithLoading(for: menuItem))
+
+            let cacheDeadline = Date().addingTimeInterval(3)
+            while model.isOpenWithLoading(for: menuItem), Date() < cacheDeadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+            }
+            check("打开方式：后台查完后菜单能拿到候选",
+                  !model.openWithCandidates(for: menuItem).isEmpty)
+
+            // 缓存后的调用必须是纯内存操作（连续 500 次不超时、不崩）
+            let memoStart = Date()
+            for _ in 0..<500 { _ = model.openWithCandidates(for: menuItem) }
+            check("打开方式：缓存命中路径极快（500 次 < 100ms）",
+                  Date().timeIntervalSince(memoStart) < 0.1)
+            model.resetOpenWithCacheForTesting()
+        }
+
+        // 运行日志的资源采样能拿到真实数值（fd 一定 > 0，否则日志里的采样没有意义）
+        let sample = RunLog.resources()
+        check("运行日志：能采到进程 fd 数", sample.fd > 0, "fd=\(sample.fd)")
+
         // MARK: 打开方式（adr/0010）
         // 只做查询类断言：不真的打开应用，也不改系统默认设置
         let probeFile = root.appendingPathComponent("small.txt")
