@@ -2,7 +2,7 @@
 
 macOS 上的「Windows 资源管理器」式文件浏览器，SwiftUI + Swift 原生实现，无 Xcode 工程、无第三方依赖。
 
-当前版本：**0.8.0（标签页 + QuickLook + 收藏夹）**，窗口尺寸 1060×680，启动后回到上次浏览的目录。
+当前版本：**0.9.0（批量重命名 + 压缩 / 解压）**，窗口尺寸 1060×680，启动后回到上次浏览的目录。
 本阶段的重点是把「文件夹操作」做扎实，应用包（`.app`）一律按普通文件处理，不做应用专属逻辑。
 
 ## 已实现
@@ -41,6 +41,9 @@ macOS 上的「Windows 资源管理器」式文件浏览器，SwiftUI + Swift �
 | **标签页** | ⌘T 新建（沿用当前目录）、⌘W 关闭、⌃Tab / ⌃⇧Tab 切换、点标签切换、拖标签排序；每个标签有独立目录/历史/选择/搜索；只剩一个标签时 ⌘W 关窗口 |
 | **快速预览** | 空格在系统 Quick Look 面板里预览选中项，多选时可 ↑↓ 在预览间切换并同步列表选中；再按空格或 Esc 关闭 |
 | **收藏夹** | 侧边栏「收藏夹」：点 + 收藏当前文件夹、右键文件夹「添加到收藏夹」、拖文件夹到标题添加、右键移除；存 UserDefaults，重启保留 |
+| **批量重命名** | 多选后 F2 / ⇧⌘R / 右键「批量重命名…」打开面板：**序号命名**（基名 + 分隔符 + 序号，可选起始序号与 2/3/4 位补零）或**查找替换**（可区分大小写、可只改主文件名保留扩展名）；改名前逐项预览，与磁盘已有项目重名 / 改后互相重名 / 名称非法都会标红并禁止执行；两阶段改名支持 A↔B 互换与只改大小写；整批可 ⌘Z 撤销 |
+| **压缩为 zip** | 单选压缩成同名 `.zip`，多选压缩成「当前文件夹名.zip」（每个项目平铺在包根）；重名自动编号「照片 2.zip」；底部忙碌卡片可取消，取消/失败不留半成品；完成后自动选中压缩包 |
+| **解压** | 右键 zip：「解压到「名称」」自动避开重名（照片 → 照片 2），包内只有一个顶层文件夹时自动消掉多余的一层嵌套；「解压到当前文件夹」先查真实文件名，遇到同名直接拒绝，绝不覆盖已有文件 |
 | 新建文件夹 | 重名自动编号「新建文件夹 2」，建完自动选中 |
 | 隐藏文件开关 | 默认隐藏 `.` 开头的文件和系统隐藏项 |
 | 右键菜单 | 打开 / 在 Finder 中显示 / 剪切 / 复制 / 粘贴到此处（文件夹）/ 复制路径 / 重命名 / 删除 / 刷新 |
@@ -67,7 +70,8 @@ macOS 上的「Windows 资源管理器」式文件浏览器，SwiftUI + Swift �
 | `⌘F` | 聚焦搜索框（`fn`+`F` 同样生效） |
 | `⌘I` | 显示简介（`fn`+`I` 同样生效，再按一次关闭） |
 | `⌘⌥C` | 复制选中项路径 |
-| `F2` | 重命名选中项 |
+| `F2` | 重命名选中项（多选时打开批量重命名面板） |
+| `⇧⌘R` | 批量重命名（`fn`/`⌥` + ⇧R 同样生效） |
 | `⌘⌫` | 移到废纸篓 |
 | `⇧⌘⌫` | 彻底删除（需在确认层点按钮） |
 | `⌘[` / `⌘]` | 后退 / 前进 |
@@ -96,18 +100,18 @@ App 用 ad-hoc 签名（`codesign -s -`）。首次访问桌面/文稿会弹一�
 
 | 环境变量 | 作用 |
 |---|---|
-| `WINEXPLORER_SELFTEST=1` | 在临时目录跑 174 项逻辑自检（读取、排序、多选、键盘焦点、导航、新建、重命名、删除、剪贴板、拖放、撤销重做、地址栏、搜索、属性面板、自动刷新、标签页、收藏夹、QuickLook 预览列表、错误处理），打印 PASS/FAIL 后退出 |
+| `WINEXPLORER_SELFTEST=1` | 在临时目录跑 214 项逻辑自检（读取、排序、多选、键盘焦点、导航、新建、重命名、删除、剪贴板、拖放、撤销重做、地址栏、搜索、属性面板、自动刷新、标签页、收藏夹、批量重命名、压缩解压、QuickLook 预览列表、错误处理），打印 PASS/FAIL 后退出 |
 | `WINEXPLORER_START=/path` | 启动即打开指定目录，便于截图验收 |
 | `WINEXPLORER_SNAPSHOT=/tmp/x.png` | 窗口渲染完成后自截图再退出（用于无「屏幕录制」权限的环境） |
 | `WINEXPLORER_SNAPSHOT_DELAY=0.5` | 覆盖截图前的等待秒数，用来抓复制进度这类瞬时状态 |
-| `WINEXPLORER_KEYS=down,down,cmd+a` | 截图前先向窗口发按键，走真实响应链验证键盘；`menu:cmd+a` 走菜单派发，`fn+a` 复现 Command 被重映射的情况，`nav:/某个/路径` 跳目录，`drop:/某个/路径` 点亮某个落点，`drag:/某个/路径` 模拟一次拖拽，`type:文本` 往当前焦点输入框里打字，`touch:文件名` 在当前目录造一个文件，`preview:/路径` 直接预览某个文件，`tab:new|close|next|prev` 操作标签页，`favorite:add|clear` 操作收藏夹 |
+| `WINEXPLORER_KEYS=down,down,cmd+a` | 截图前先向窗口发按键，走真实响应链验证键盘；`menu:cmd+a` 走菜单派发，`fn+a` 复现 Command 被重映射的情况，`nav:/某个/路径` 跳目录，`sel:片段` 选中名字含该片段的所有项，`drop:/某个/路径` 点亮某个落点，`drag:/某个/路径` 模拟一次拖拽，`type:文本` 往当前焦点输入框里打字，`touch:文件名` 在当前目录造一个文件，`preview:/路径` 直接预览某个文件，`tab:new|close|next|prev` 操作标签页，`favorite:add|clear` 操作收藏夹，`rename:batch[:基名]` 打开批量重命名面板，`archive:zip|unzip|unzip-here` 压缩 / 解压当前选区 |
 | `WINEXPLORER_DRAG_DRYRUN=1` | 配合 `drag:` 使用：只打印"这次会拖哪些文件"，不真的进入模态拖拽会话 |
 
 ```bash
 WINEXPLORER_SELFTEST=1 ./build/WinExplorer.app/Contents/MacOS/WinExplorer
 ```
 
-最近一次自检结果：174/174 PASS（所有用例都在临时目录内，自检期间不写系统剪贴板、不写用户偏好、不开目录监听）。
+最近一次自检结果：214/214 PASS（所有用例都在临时目录内，自检期间不写系统剪贴板、不写用户偏好、不开目录监听）。
 
 ## 代码结构
 
@@ -120,10 +124,12 @@ Sources/WinExplorer/
 │   ├── Clipboard.swift         # 文件剪贴板（复制/剪切两种语义）
 │   ├── UndoEntry.swift         # 一条可撤销操作（标题 + undo/redo）
 │   ├── ViewPreferences.swift   # 视图模式、列宽、偏好持久化
+│   ├── BatchRename.swift       # 批量重命名状态 + 预览/冲突计算（纯逻辑）
 │   └── FavoritesStore.swift    # 收藏夹（路径持久化）
 ├── Services/
 │   ├── FileSystemService.swift # 目录读取 + 排序（文件夹优先、自然排序）
 │   ├── TransferService.swift   # 递归复制/移动、同卷判定、副本命名、进度与取消
+│   ├── ArchiveService.swift    # zip 压缩/解压（ditto / zip 子进程）+ 目标命名与冲突检查
 │   ├── DragSupport.swift       # 行探针命中 + AppKit 拖拽会话 + onDrop 解析
 │   ├── DirectoryWatcher.swift  # vnode 事件源 + 防抖，外部改动自动刷新
 │   ├── FileInfoService.swift   # 属性数据 + 文件夹递归统计
@@ -140,8 +146,9 @@ Sources/WinExplorer/
     ├── SidebarView.swift
     ├── PathBar.swift           # 面包屑 + 可编辑路径（⌘L）
     ├── FileListView.swift      # 共用列骨架 FileListLayout（表头/行严格对齐）+ 右键菜单
-    ├── TransferProgressView.swift  # 复制/移动进度卡片
+    ├── TransferProgressView.swift  # 复制/移动进度卡片（也用于压缩解压的忙碌态）
     ├── RenameField.swift       # 行内重命名输入框
+    ├── BatchRenameView.swift   # 批量重命名面板浮层（序号命名 / 查找替换 + 逐项预览）
     ├── PathField.swift         # 地址栏输入框（Enter/Tab/Esc）
     ├── SearchField.swift       # 地址栏右侧搜索框（NSSearchField）
     ├── InfoPanelView.swift     # 属性面板浮层
@@ -159,6 +166,9 @@ Sources/WinExplorer/
 - 图标视图的图标尺寸固定（104×84 格），还不支持滑块缩放
 - 搜索只在当前文件夹内按文件名过滤，不递归子目录、不搜内容（全盘搜索请用 Spotlight）
 - 属性面板只读，不能在那里改权限或名称
+- 压缩 / 解压只支持 zip（rar / 7z 请交给系统或第三方工具）；大目录没有细粒度进度，只有「处理中…」忙碌条
+- 解压到当前文件夹遇到同名项目会整批拒绝，不做「全部替换 / 跳过」的选择对话框
+- 批量重命名的查找替换是字面量替换，不支持正则与编号通配符
 - 地址栏只接受绝对路径和 `~`，不解析相对路径，也没有历史下拉
 - 图标同步加载，超大目录（数千项）会有可感知的打开延迟
 - 未做目录大小统计（文件夹大小显示 `—`，和 Windows 默认行为一致）
@@ -186,11 +196,10 @@ Sources/WinExplorer/
 - 状态栏显示磁盘剩余空间
 
 ### Phase 4 · 系统集成
-- ✅ QuickLook（QLPreviewPanel）、✅ ⌘I 属性面板、打开方式菜单
-- Finder 标签、共享、压缩/解压
+- ✅ QuickLook（QLPreviewPanel）、✅ ⌘I 属性面板、✅ 压缩 / 解压（zip）、打开方式菜单
 - ✅ 侧边栏收藏夹自定义（拖入即收藏）
 - 全局快捷键唤出；菜单栏常驻模式（LSUIElement + NSPanel）
 - 打包 `.pkg` / DMG、开机自启（LaunchAgent）
 
 ### Phase 5 · 进阶
-- 批量重命名、目录大小异步统计、网络位置与挂载卷、Total Commander 式双栏
+- ✅ 批量重命名；目录大小异步统计、网络位置与挂载卷、Total Commander 式双栏

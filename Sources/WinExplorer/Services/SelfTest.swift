@@ -772,6 +772,229 @@ enum SelfTest {
         favorites.remove(featureRoot)
         check("移除收藏", favorites.items.isEmpty)
 
+        // MARK: 批量重命名
+
+        let batchRoot = root.appendingPathComponent("批量测试")
+        try? fm.createDirectory(at: batchRoot, withIntermediateDirectories: true)
+        for index in 1...3 {
+            fm.createFile(atPath: batchRoot.appendingPathComponent("假日 \(index).jpg").path,
+                          contents: Data("J\(index)".utf8))
+        }
+        fm.createFile(atPath: batchRoot.appendingPathComponent("旅行 01.jpg").path, contents: Data("X".utf8))
+        try? fm.createDirectory(at: batchRoot.appendingPathComponent("子相册"), withIntermediateDirectories: true)
+
+        model.navigate(to: batchRoot)
+        model.reload()
+
+        let photos = model.items.filter { $0.name.hasPrefix("假日") && $0.name.hasSuffix(".jpg") }
+        check("批量测试目录准备就绪", photos.count == 3, "实际 \(model.items.map(\.name))")
+
+        if photos.count == 3 {
+            model.handleClick(on: photos[0], modifiers: [])
+            model.handleClick(on: photos[1], modifiers: [.command])
+            model.handleClick(on: photos[2], modifiers: [.command])
+            model.beginBatchRename()
+            check("多选后打开批量重命名面板", model.batchRename != nil && model.hasModalOverlay)
+
+            model.updateBatchRename { state in
+                state.baseName = "旅行"
+                state.separator = " "
+                state.digits = 2
+                state.startIndex = 1
+            }
+
+            let conflictPlan = model.batchRenamePlan
+            check("预览按列表顺序编号",
+                  Array(conflictPlan?.rows.map(\.newName).prefix(2) ?? []) == ["旅行 01.jpg", "旅行 02.jpg"],
+                  "实际 \(conflictPlan?.rows.map(\.newName) ?? [])")
+            check("与磁盘已有文件重名会被拦下",
+                  conflictPlan?.rows.first?.problem == "已存在同名项目",
+                  "实际 \(conflictPlan?.rows.first?.problem ?? "nil")")
+            check("有冲突时不可执行", conflictPlan?.isApplicable == false)
+
+            model.applyBatchRename()
+            check("有冲突时不改任何文件",
+                  fm.fileExists(atPath: batchRoot.appendingPathComponent("假日 1.jpg").path))
+            check("有冲突时面板保持打开", model.batchRename != nil)
+
+            model.updateBatchRename { $0.baseName = "假期" }
+            let okPlan = model.batchRenamePlan
+            check("换基名后可以执行", okPlan?.isApplicable == true)
+            check("预览保持三项", okPlan?.rows.count == 3)
+
+            model.applyBatchRename()
+            check("批量重命名生效",
+                  [1, 2, 3].allSatisfy {
+                      fm.fileExists(atPath: batchRoot.appendingPathComponent(
+                          String(format: "假期 %02d.jpg", $0)).path)
+                  })
+            check("旧名字全部消失",
+                  (1...3).allSatisfy {
+                      !fm.fileExists(atPath: batchRoot.appendingPathComponent("假日 \($0).jpg").path)
+                  })
+            check("执行后面板关闭", model.batchRename == nil)
+            check("批量重命名进入撤销栈",
+                  model.canUndo && (model.undoTitle?.contains("批量重命名") ?? false),
+                  "undoTitle=\(model.undoTitle ?? "nil")")
+            check("重命名后选中新项目",
+                  model.selection.contains { $0.lastPathComponent == "假期 01.jpg" },
+                  "选中 \(model.selection.map(\.lastPathComponent))")
+
+            model.undo()
+            check("撤销批量重命名恢复原名",
+                  fm.fileExists(atPath: batchRoot.appendingPathComponent("假日 1.jpg").path)
+                    && !fm.fileExists(atPath: batchRoot.appendingPathComponent("假期 01.jpg").path))
+            model.redo()
+            check("重做批量重命名",
+                  fm.fileExists(atPath: batchRoot.appendingPathComponent("假期 01.jpg").path))
+
+            // 查找替换（保留扩展名）
+            model.reload()
+            let renamed = model.items.filter { $0.name.hasPrefix("假期") }
+            if renamed.count == 3 {
+                model.handleClick(on: renamed[0], modifiers: [])
+                model.handleClick(on: renamed[1], modifiers: [.command])
+                model.handleClick(on: renamed[2], modifiers: [.command])
+                model.beginBatchRename()
+                model.updateBatchRename { state in
+                    state.mode = .replace
+                    state.findText = "假期 "
+                    state.replaceText = "出行"
+                    state.keepExtension = true
+                }
+                let replacePlan = model.batchRenamePlan
+                check("查找替换保留扩展名",
+                      replacePlan?.rows.first?.newName == "出行01.jpg",
+                      "实际 \(replacePlan?.rows.first?.newName ?? "nil")")
+                check("查找替换可执行", replacePlan?.isApplicable == true)
+                model.applyBatchRename()
+                check("查找替换改名生效",
+                      fm.fileExists(atPath: batchRoot.appendingPathComponent("出行01.jpg").path))
+            } else {
+                check("查找替换保留扩展名", false, "找不到改名后的文件")
+            }
+        }
+
+        // 两项被改成同一个名字 → 整批拒绝
+        fm.createFile(atPath: batchRoot.appendingPathComponent("报告-甲.txt").path, contents: Data("a".utf8))
+        fm.createFile(atPath: batchRoot.appendingPathComponent("报告-乙.txt").path, contents: Data("b".utf8))
+        model.reload()
+        let reports = model.items.filter { $0.name.hasPrefix("报告-") }
+        if reports.count == 2 {
+            model.handleClick(on: reports[0], modifiers: [])
+            model.handleClick(on: reports[1], modifiers: [.command])
+            model.beginRename()
+            check("多选按 F2 进入批量重命名", model.batchRename != nil)
+
+            model.updateBatchRename { state in
+                state.mode = .replace
+                state.findText = "甲"
+                state.replaceText = "乙"
+            }
+            let duplicatePlan = model.batchRenamePlan
+            check("改成已被占用的名字会被拦下",
+                  duplicatePlan?.rows.contains { $0.problem != nil } == true,
+                  "实际 \(duplicatePlan?.rows.map { $0.problem ?? "-" } ?? [])")
+            check("重名冲突时不可执行", duplicatePlan?.isApplicable == false)
+
+            model.cancelBatchRename()
+            check("取消批量重命名关闭面板", model.batchRename == nil && !model.hasModalOverlay)
+            check("取消后文件保持原样",
+                  fm.fileExists(atPath: batchRoot.appendingPathComponent("报告-甲.txt").path))
+        } else {
+            check("多选按 F2 进入批量重命名", false, "找不到报告文件")
+        }
+
+        // MARK: 压缩 / 解压
+
+        let archiveRoot = root.appendingPathComponent("压缩测试")
+        let photoDir = archiveRoot.appendingPathComponent("照片")
+        try? fm.createDirectory(at: photoDir, withIntermediateDirectories: true)
+        fm.createFile(atPath: photoDir.appendingPathComponent("a.jpg").path, contents: Data("A".utf8))
+        fm.createFile(atPath: photoDir.appendingPathComponent("b.jpg").path, contents: Data("B".utf8))
+
+        model.navigate(to: archiveRoot)
+        model.reload()
+        model.focus(url: photoDir)
+        check("选中文件夹可以压缩", model.canCompress)
+
+        model.compressSelection()
+        let photoZip = archiveRoot.appendingPathComponent("照片.zip")
+        check("压缩生成同名 zip", fm.fileExists(atPath: photoZip.path))
+        check("压缩完成后自动选中 zip",
+              model.selection.contains {
+                  $0.standardizedFileURL.path == photoZip.standardizedFileURL.path
+              },
+              "选中 \(model.selection.map(\.lastPathComponent))")
+        check("压缩不动原文件夹",
+              fm.fileExists(atPath: photoDir.appendingPathComponent("a.jpg").path))
+        check("重复压缩自动改名",
+              ArchiveService.compressDestination(for: [photoDir], in: archiveRoot).lastPathComponent == "照片 2.zip",
+              "实际 \(ArchiveService.compressDestination(for: [photoDir], in: archiveRoot).lastPathComponent)")
+
+        // 解压到同名文件夹：原目录已存在，所以自动用「照片 2」
+        model.focus(url: photoZip)
+        check("选中 zip 可以解压", model.canExtract)
+        model.extractSelection(toOwnFolder: true)
+        let extracted = archiveRoot.appendingPathComponent("照片 2")
+        check("解压到新文件夹", fm.fileExists(atPath: extracted.appendingPathComponent("a.jpg").path))
+        check("解压内容正确", text(extracted.appendingPathComponent("b.jpg")) == "B",
+              "实际 \(text(extracted.appendingPathComponent("b.jpg")))")
+
+        // 多选压缩：包名取当前文件夹名，两个文件平铺在包根
+        fm.createFile(atPath: archiveRoot.appendingPathComponent("一.txt").path, contents: Data("1".utf8))
+        fm.createFile(atPath: archiveRoot.appendingPathComponent("二.txt").path, contents: Data("2".utf8))
+        model.reload()
+        if let one = model.items.first(where: { $0.name == "一.txt" }),
+           let two = model.items.first(where: { $0.name == "二.txt" }) {
+            model.handleClick(on: one, modifiers: [])
+            model.handleClick(on: two, modifiers: [.command])
+            model.compressSelection()
+            let multiZip = archiveRoot.appendingPathComponent("压缩测试.zip")
+            check("多选压缩用文件夹名命名", fm.fileExists(atPath: multiZip.path))
+
+            model.focus(url: multiZip)
+            model.extractSelection(toOwnFolder: true)
+            let multiExtracted = archiveRoot.appendingPathComponent("压缩测试")
+            check("多选压缩包能解出两个文件",
+                  fm.fileExists(atPath: multiExtracted.appendingPathComponent("一.txt").path)
+                    && fm.fileExists(atPath: multiExtracted.appendingPathComponent("二.txt").path))
+        } else {
+            check("多选压缩用文件夹名命名", false, "找不到测试文件")
+        }
+
+        // 解压到当前文件夹：顶层同名项已存在 → 拒绝，绝不覆盖
+        model.focus(url: photoZip)
+        model.extractSelection(toOwnFolder: false)
+        check("同名冲突时拒绝解压到当前文件夹", model.errorMessage != nil)
+        check("拒绝时不覆盖已有文件夹", text(photoDir.appendingPathComponent("a.jpg")) == "A")
+        model.dismissError()
+
+        // 解压到当前文件夹：没有冲突时正常落地
+        let soloFile = archiveRoot.appendingPathComponent("独一份.txt")
+        fm.createFile(atPath: soloFile.path, contents: Data("U".utf8))
+        model.reload()
+        model.focus(url: soloFile)
+        model.compressSelection()
+        try? fm.removeItem(at: soloFile)
+        model.reload()
+        if let soloZip = model.items.first(where: { $0.name == "独一份.zip" }) {
+            model.focus(url: soloZip.url)
+            model.extractSelection(toOwnFolder: false)
+            check("解压到当前文件夹", fm.fileExists(atPath: soloFile.path))
+            check("当前文件夹解压内容正确", text(soloFile) == "U", "实际 \(text(soloFile))")
+        } else {
+            check("解压到当前文件夹", false, "找不到独一份.zip")
+        }
+
+        // 非 zip 不能解压
+        if let txt = model.items.first(where: { $0.name == "一.txt" }) {
+            model.focus(url: txt.url)
+            check("非 zip 不能解压", !model.canExtract)
+            model.extractSelection(toOwnFolder: true)
+            check("非 zip 解压给出提示", model.flash != nil)
+        }
+
         // MARK: Quick Look
 
         let quickLook = QuickLookController.shared

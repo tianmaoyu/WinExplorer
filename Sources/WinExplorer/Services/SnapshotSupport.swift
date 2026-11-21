@@ -71,6 +71,45 @@ enum SnapshotSupport {
                         }
                         return
                     }
+                    if key.hasPrefix("sel:") {
+                        // sel:片段 = 选中名字里包含该片段的全部项目（第一个作为焦点，供截图用）
+                        let needle = String(key.dropFirst("sel:".count))
+                        let matches = active.items.filter { $0.name.contains(needle) }
+                        if let first = matches.first {
+                            active.handleClick(on: first, modifiers: [])
+                            for item in matches.dropFirst() {
+                                active.handleClick(on: item, modifiers: [.command])
+                            }
+                        }
+                        return
+                    }
+                    if key.hasPrefix("rename:") {
+                        // rename:batch 或 rename:batch:基名 = 打开批量重命名面板
+                        let payload = String(key.dropFirst("rename:".count))
+                        let parts = payload.split(separator: ":", maxSplits: 1).map(String.init)
+                        if parts.first == "batch" {
+                            if active.selection.count < 2 { active.selectAll() }
+                            active.beginBatchRename()
+                            if parts.count > 1, !parts[1].isEmpty {
+                                let base = parts[1]
+                                active.updateBatchRename {
+                                    $0.baseName = base
+                                    $0.digits = 2
+                                }
+                            }
+                        }
+                        return
+                    }
+                    if key.hasPrefix("archive:") {
+                        // archive:zip / archive:unzip，验证压缩与解压（作用于当前选区）
+                        switch String(key.dropFirst("archive:".count)) {
+                        case "zip": active.compressSelection()
+                        case "unzip": active.extractSelection(toOwnFolder: true)
+                        case "unzip-here": active.extractSelection(toOwnFolder: false)
+                        default: break
+                        }
+                        return
+                    }
                     if key.hasPrefix("drag:") {
                         dryRunDrag(path: String(key.dropFirst("drag:".count)), window: window)
                         return

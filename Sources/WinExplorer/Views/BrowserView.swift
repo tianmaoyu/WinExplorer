@@ -64,6 +64,11 @@ struct BrowserView: View {
             }
         }
         .overlay {
+            if model.batchRename != nil {
+                BatchRenameView(model: model)
+            }
+        }
+        .overlay {
             if let info = model.info {
                 InfoPanelView(
                     state: info,
@@ -82,6 +87,10 @@ struct BrowserView: View {
             if let progress = model.transfer {
                 TransferProgressView(progress: progress) {
                     model.cancelTransfer()
+                }
+            } else if let busy = model.archiveBusy {
+                TransferProgressView(progress: busy) {
+                    model.cancelArchive()
                 }
             }
         }
@@ -154,6 +163,12 @@ struct BrowserView: View {
     /// 有些用户把 Command 重映射成了别的键，菜单快捷键可能收不到。
     private func handleKey(_ event: NSEvent) -> Bool {
         let flags = event.modifierFlags
+
+        // 批量重命名面板：键盘交给面板里的输入框，这里只兜住 Esc 关闭
+        if model.batchRename != nil {
+            if event.keyCode == 53 { model.cancelBatchRename() }
+            return true
+        }
 
         // 浮层（彻底删除确认 / 属性面板）打开时拦住所有按键：
         // Esc 或 Return 关闭，⌘I 切掉属性面板，其它一律忽略，避免在浮层后面误操作列表
@@ -263,6 +278,15 @@ struct BrowserView: View {
             let fitFlags: NSEvent.ModifierFlags = [.command, .function]
             if !flags.intersection(fitFlags).isEmpty, !flags.contains(.control) {
                 model.autoFitAllColumns()
+                return true
+            }
+        }
+
+        // ⇧R = 批量重命名（⇧⌘R），兼容 Command 被重映射后的 fn/⌥ 版本
+        if event.keyCode == 15, flags.contains(.shift) {
+            let batchFlags: NSEvent.ModifierFlags = [.command, .function, .option]
+            if !flags.intersection(batchFlags).isEmpty, !flags.contains(.control) {
+                model.beginBatchRename()
                 return true
             }
         }

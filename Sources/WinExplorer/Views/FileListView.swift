@@ -398,8 +398,30 @@ struct FileListView: View {
             }
         }
         Divider()
-        Button("重命名…") {
-            model.beginRename(item: item)
+        Button(inSelection && model.selection.count > 1 ? "批量重命名…" : "重命名…") {
+            if inSelection && model.selection.count > 1 {
+                model.beginBatchRename()
+            } else {
+                model.beginRename(item: item)
+            }
+        }
+        Divider()
+        Button("压缩为 zip") {
+            if !inSelection { model.selectOnly(item) }
+            model.compressSelection()
+        }
+        .disabled(!model.canCompress)
+        if ArchiveService.isArchive(item.url) {
+            Button("解压到「\(ArchiveService.extractDestination(for: item.url, in: model.currentURL).lastPathComponent)」") {
+                if !inSelection { model.selectOnly(item) }
+                model.extractSelection(toOwnFolder: true)
+            }
+            .disabled(!model.canExtract)
+            Button("解压到当前文件夹") {
+                if !inSelection { model.selectOnly(item) }
+                model.extractSelection(toOwnFolder: false)
+            }
+            .disabled(!model.canExtract)
         }
         Divider()
         Button("移到废纸篓") {

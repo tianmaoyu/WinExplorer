@@ -13,11 +13,13 @@ struct TransferRequest {
 }
 
 /// 传输进度。completed / total 以「叶子文件数」计，所以单个大目录也能看到推进。
+/// 压缩 / 解压这类交给系统子进程、拿不到细粒度进度的工作用 `indeterminate` 显示忙碌条。
 struct TransferProgress: Equatable {
     var title: String
     var completed: Int
     var total: Int
     var currentName: String
+    var indeterminate: Bool = false
 
     var fraction: Double {
         guard total > 0 else { return 0 }

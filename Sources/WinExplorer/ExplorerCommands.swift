@@ -72,7 +72,30 @@ struct ExplorerCommands: Commands {
                 model.beginRename()
             }
             .keyboardShortcut(KeyEquivalent("\u{F705}"), modifiers: [])
-            .disabled(model.selection.count != 1)
+            .disabled(!model.hasSelection)
+
+            Button("批量重命名…") {
+                model.beginBatchRename()
+            }
+            .keyboardShortcut("r", modifiers: [.command, .shift])
+            .disabled(model.selection.count < 2)
+
+            Divider()
+
+            Button("压缩为 zip") {
+                model.compressSelection()
+            }
+            .disabled(!model.canCompress)
+
+            Button("解压到同名文件夹") {
+                model.extractSelection(toOwnFolder: true)
+            }
+            .disabled(!model.canExtract)
+
+            Button("解压到当前文件夹") {
+                model.extractSelection(toOwnFolder: false)
+            }
+            .disabled(!model.canExtract || model.selection.count != 1)
 
             Button("刷新") {
                 model.reload()

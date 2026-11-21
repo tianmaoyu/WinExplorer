@@ -6,15 +6,24 @@ struct TransferProgressView: View {
     let progress: TransferProgress
     let onCancel: () -> Void
 
+    /// 不确定进度时来回滑动的色块位置（0…1）
+    @State private var shimmer: CGFloat = 0
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Text(progress.title)
                     .font(.system(size: 12, weight: .semibold))
                 Spacer(minLength: 12)
-                Text("\(number(progress.completed))/\(number(progress.total)) · \(percent)%")
-                    .font(.system(size: 11).monospacedDigit())
-                    .foregroundStyle(.secondary)
+                if progress.indeterminate {
+                    Text("处理中…")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("\(number(progress.completed))/\(number(progress.total)) · \(percent)%")
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
             }
 
             // 自绘进度条：系统 ProgressView 在每秒几十次更新时会被截图抓到空状态
@@ -22,15 +31,28 @@ struct TransferProgressView: View {
                 ZStack(alignment: .leading) {
                     Capsule()
                         .fill(Color.primary.opacity(0.10))
-                    Capsule()
-                        .fill(Color.accentColor)
-                        .frame(width: max(2, geometry.size.width * progress.fraction))
+                    if progress.indeterminate {
+                        Capsule()
+                            .fill(Color.accentColor)
+                            .frame(width: max(40, geometry.size.width * 0.32))
+                            .offset(x: shimmer * max(geometry.size.width - max(40, geometry.size.width * 0.32), 0))
+                            .onAppear {
+                                withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) {
+                                    shimmer = 1
+                                }
+                            }
+                    } else {
+                        Capsule()
+                            .fill(Color.accentColor)
+                            .frame(width: max(2, geometry.size.width * progress.fraction))
+                    }
                 }
             }
             .frame(height: 6)
+            .clipShape(Capsule())
 
             HStack(spacing: 8) {
-                Text(progress.currentName.isEmpty ? "准备中…" : progress.currentName)
+                Text(currentLabel)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -50,6 +72,13 @@ struct TransferProgressView: View {
         .shadow(color: .black.opacity(0.15), radius: 14, y: 6)
         .padding(.bottom, 18)
         .transition(.opacity.combined(with: .move(edge: .bottom)))
+    }
+
+    private var currentLabel: String {
+        if progress.currentName.isEmpty {
+            return progress.indeterminate ? "正在调用系统归档工具…" : "准备中…"
+        }
+        return progress.currentName
     }
 
     private var percent: Int {

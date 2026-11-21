@@ -39,6 +39,12 @@ final class BrowserModel: ObservableObject {
     /// 等待用户确认的"彻底删除"目标
     @Published private(set) var pendingPermanentDelete: [FileItem]?
 
+    /// 批量重命名编辑态（nil 表示面板关闭）
+    @Published var batchRename: BatchRenameState?
+    /// 压缩 / 解压这类"拿不到细粒度进度"的任务（nil 表示空闲）
+    @Published private(set) var archiveBusy: TransferProgress?
+    private var archiveTask: ArchiveTask?
+
     /// 应用内文件剪贴板（复制 / 剪切）
     @Published private(set) var clipboard: FileClipboard?
     /// 正在进行的复制 / 跨卷移动（nil 表示空闲）
@@ -288,6 +294,22 @@ final class BrowserModel: ObservableObject {
     /// 有复制/移动任务在跑
     var isTransferring: Bool { transfer != nil }
 
+    /// 有复制/移动/压缩/解压任务在跑（这些操作都会改磁盘，彼此不能并发）
+    var isBusy: Bool { transfer != nil || archiveBusy != nil }
+
+    /// 可以压缩：选了东西且没有别的任务在跑
+    var canCompress: Bool { hasSelection && !isBusy }
+
+    /// 可以解压：选区里至少有一个 zip
+    var canExtract: Bool {
+        hasSelection && !isBusy && selectedItems.contains { ArchiveService.isArchive($0.url) }
+    }
+
+    /// 批量重命名的预览结果（面板关闭时为 nil）
+    var batchRenamePlan: BatchRenamePlan? {
+        batchRename.map { BatchRenamePlan.make($0) }
+    }
+
     /// 该行是否是当前拖拽落点。
     /// 不能直接用 URL 相等：枚举出来的 URL 可能带尾斜杠，/tmp 也会被标准化成 /private/tmp。
     func isDropTarget(_ url: URL) -> Bool {
@@ -500,6 +522,7 @@ final class BrowserModel: ObservableObject {
             clearSelection()
             renamingURL = nil
             pendingPermanentDelete = nil
+            batchRename = nil
             dropTargetURL = nil
             errorMessage = nil
             isEditingPath = false
@@ -552,9 +575,11 @@ final class BrowserModel: ObservableObject {
         // 用户正在编辑或确认时不打断：这些操作结束时会各自 reload
         guard renamingURL == nil,
               pendingPermanentDelete == nil,
+              batchRename == nil,
               info == nil,
               !isEditingPath,
-              transfer == nil else { return }
+              transfer == nil,
+              archiveBusy == nil else { return }
         refreshFromDisk()
     }
 
@@ -912,9 +937,9 @@ final class BrowserModel: ObservableObject {
         }
     }
 
-    /// 属性面板打开时，方向键/快捷键不应继续操作后台列表
+    /// 属性面板 / 删除确认 / 批量重命名打开时，方向键/快捷键不应继续操作后台列表
     var hasModalOverlay: Bool {
-        info != nil || pendingPermanentDelete != nil
+        info != nil || pendingPermanentDelete != nil || batchRename != nil
     }
 
     // MARK: - 剪贴板
@@ -1262,7 +1287,12 @@ final class BrowserModel: ObservableObject {
     // MARK: - 重命名
 
     func beginRename() {
-        guard selection.count == 1, let item = selectedItems.first else {
+        // 多选时按 F2 走批量重命名（Windows 11 的行为），单选走行内编辑
+        if selection.count > 1 {
+            beginBatchRename()
+            return
+        }
+        guard let item = selectedItems.first else {
             showFlash("请先选中一个项目再重命名")
             return
         }
@@ -1321,6 +1351,276 @@ final class BrowserModel: ObservableObject {
             errorMessage = "重命名失败：\(error.localizedDescription)"
             return false
         }
+    }
+
+    // MARK: - 批量重命名
+
+    /// 多选后 F2 / 菜单 / 右键进入
+    func beginBatchRename() {
+        let targets = selectedItems
+        guard targets.count > 1 else {
+            showFlash("请先选中多个项目")
+            return
+        }
+        renamingURL = nil
+        errorMessage = nil
+
+        let seed = targets.first { $0.url == focusedURL } ?? targets[0]
+        batchRename = BatchRenameState(items: targets, baseName: BatchRenameState.stem(of: seed))
+    }
+
+    func cancelBatchRename() {
+        batchRename = nil
+    }
+
+    /// 面板里每次改字段都走这里，保证预览是实时的
+    func updateBatchRename(_ mutate: (inout BatchRenameState) -> Void) {
+        guard var state = batchRename else { return }
+        mutate(&state)
+        batchRename = state
+    }
+
+    func applyBatchRename() {
+        guard let state = batchRename else { return }
+        let plan = BatchRenamePlan.make(state)
+
+        if !plan.problems.isEmpty {
+            errorMessage = plan.problems.joined(separator: "；")
+            return
+        }
+        guard plan.isApplicable else {
+            if plan.changes.isEmpty { showFlash("名称没有变化") }
+            return
+        }
+
+        let moves = plan.changes
+        let failures = Self.applyRenames(moves)
+        batchRename = nil
+
+        guard failures.isEmpty else {
+            reload()
+            errorMessage = "批量重命名未完成：\n" + failures.joined(separator: "\n")
+            return
+        }
+
+        let backward = moves.map { (from: $0.to, to: $0.from) }
+        registerUndo(UndoEntry(
+            title: "批量重命名 \(moves.count) 项",
+            undo: { [weak self] in
+                let result = Self.applyRenames(backward)
+                if !result.isEmpty {
+                    self?.errorMessage = "撤销批量重命名失败：\n" + result.joined(separator: "\n")
+                }
+            },
+            redo: { [weak self] in
+                let result = Self.applyRenames(moves)
+                if !result.isEmpty {
+                    self?.errorMessage = "重做批量重命名失败：\n" + result.joined(separator: "\n")
+                }
+            }
+        ))
+
+        reload()
+        select(urls: moves.map { $0.to })
+        showFlash("已重命名 \(moves.count) 项")
+    }
+
+    /// 两阶段改名：先全部挪到临时名，再挪到目标名。
+    /// 这样 A→B 与 B→A 互换、以及只改大小写（大小写不敏感磁盘）都不会互相踩。
+    /// 任何一步失败都回滚已完成的动作。
+    @discardableResult
+    private static func applyRenames(_ moves: [(from: URL, to: URL)]) -> [String] {
+        guard !moves.isEmpty else { return [] }
+        let fm = FileManager.default
+        var staged: [(temp: URL, to: URL, from: URL)] = []
+        var finished: [(to: URL, from: URL)] = []
+        var failures: [String] = []
+
+        func rollback() {
+            for entry in finished.reversed() where fm.fileExists(atPath: entry.to.path) {
+                try? fm.moveItem(at: entry.to, to: entry.from)
+            }
+            for entry in staged.reversed() where fm.fileExists(atPath: entry.temp.path) {
+                try? fm.moveItem(at: entry.temp, to: entry.from)
+            }
+        }
+
+        for move in moves {
+            let temp = move.from.deletingLastPathComponent()
+                .appendingPathComponent(".winexplorer-rename-\(UUID().uuidString)")
+            do {
+                try fm.moveItem(at: move.from, to: temp)
+                staged.append((temp, move.to, move.from))
+            } catch {
+                failures.append("\(move.from.lastPathComponent)：\(error.localizedDescription)")
+                rollback()
+                return failures
+            }
+        }
+
+        for entry in staged {
+            do {
+                try fm.moveItem(at: entry.temp, to: entry.to)
+                finished.append((entry.to, entry.from))
+            } catch {
+                failures.append("\(entry.from.lastPathComponent)：\(error.localizedDescription)")
+                rollback()
+                return failures
+            }
+        }
+        return failures
+    }
+
+    // MARK: - 压缩 / 解压
+
+    /// 把选中项压缩成 zip，落在当前文件夹
+    func compressSelection() {
+        guard !isBusy else {
+            showFlash("上一项操作还没结束")
+            return
+        }
+        let targets = selectedItems.map(\.url)
+        guard !targets.isEmpty else {
+            showFlash("请先选中要压缩的项目")
+            return
+        }
+        let destination = ArchiveService.compressDestination(for: targets, in: currentURL)
+        runArchive(
+            title: "正在压缩 \(destination.lastPathComponent)",
+            result: destination,
+            success: "已压缩为「\(destination.lastPathComponent)」"
+        ) { task in
+            try ArchiveService.compress(items: targets, to: destination, task: task)
+        }
+    }
+
+    /// 解压选中的 zip。
+    /// - toOwnFolder = true：每个压缩包解到同名的新文件夹（绝不覆盖已有文件）
+    /// - toOwnFolder = false：解到当前文件夹；先查顶层同名项，有冲突直接拒绝
+    func extractSelection(toOwnFolder: Bool = true) {
+        guard !isBusy else {
+            showFlash("上一项操作还没结束")
+            return
+        }
+        let archives = selectedItems.filter { ArchiveService.isArchive($0.url) }
+        guard !archives.isEmpty else {
+            showFlash("请先选中 zip 压缩包")
+            return
+        }
+
+        if toOwnFolder {
+            let destinations = archives.map {
+                ArchiveService.extractDestination(for: $0.url, in: currentURL)
+            }
+            let count = archives.count
+            runArchive(
+                title: count == 1 ? "正在解压 \(archives[0].name)" : "正在解压 \(count) 个压缩包",
+                result: destinations.last,
+                success: count == 1
+                    ? "已解压到「\(destinations[0].lastPathComponent)」"
+                    : "已解压 \(count) 个压缩包"
+            ) { task in
+                var failures: [String] = []
+                for (index, archive) in archives.enumerated() {
+                    do {
+                        try ArchiveService.extract(archive: archive.url, to: destinations[index], task: task)
+                    } catch {
+                        if task.isCancelled { throw ArchiveService.Failure.cancelled }
+                        failures.append("\(archive.name)：\(error.localizedDescription)")
+                    }
+                }
+                if !failures.isEmpty {
+                    throw ArchiveService.Failure.invalid(failures.joined(separator: "\n"))
+                }
+            }
+            return
+        }
+
+        guard archives.count == 1 else {
+            showFlash("「解压到当前文件夹」一次只能处理一个压缩包")
+            return
+        }
+        let archive = archives[0].url
+        let targetDirectory = currentURL
+        runArchive(
+            title: "正在解压 \(archive.lastPathComponent)",
+            result: nil,
+            success: "已解压到当前文件夹"
+        ) { task in
+            try ArchiveService.extract(archive: archive, to: targetDirectory, task: task)
+        }
+    }
+
+    /// 压缩 / 解压统一执行器：后台跑系统子进程，底部显示忙碌卡片，可取消
+    private func runArchive(
+        title: String,
+        result: URL?,
+        success: String,
+        work: @escaping (ArchiveTask) throws -> Void
+    ) {
+        let task = ArchiveTask()
+        archiveTask = task
+        archiveBusy = TransferProgress(
+            title: title,
+            completed: 0,
+            total: 1,
+            currentName: "",
+            indeterminate: true
+        )
+        errorMessage = nil
+
+        func finish(_ failure: String?) {
+            archiveTask = nil
+            archiveBusy = nil
+            reload()
+            if let failure {
+                if failure == ArchiveService.Failure.cancelled.errorDescription {
+                    showFlash("已取消")
+                } else {
+                    errorMessage = failure
+                }
+            } else {
+                if let result { revealNewItem(result) }
+                showFlash(success)
+            }
+        }
+
+        // 自检模式同步执行，方便断言（生产路径始终走后台队列）
+        if Self.runsTransfersSynchronously {
+            do {
+                try work(task)
+                finish(nil)
+            } catch {
+                finish(error.localizedDescription)
+            }
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            var failure: String?
+            do {
+                try work(task)
+            } catch {
+                failure = error.localizedDescription
+            }
+            DispatchQueue.main.async { finish(failure) }
+        }
+    }
+
+    /// 操作完成后把新生成的项选中并滚进视口（不在当前目录就只刷新）
+    private func revealNewItem(_ url: URL) {
+        let path = url.standardizedFileURL.path
+        guard let match = items.first(where: { $0.url.standardizedFileURL.path == path }) else { return }
+        selection = [match.url]
+        focusedURL = match.url
+        anchorURL = match.url
+        scrollRequest = ScrollRequest(match.url)
+    }
+
+    func cancelArchive() {
+        guard archiveTask != nil else { return }
+        archiveTask?.cancel()
+        showFlash("正在取消…")
     }
 
     // MARK: - 删除
