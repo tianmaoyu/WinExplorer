@@ -5,7 +5,7 @@
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)
 ![Swift 5.9](https://img.shields.io/badge/Swift-5.9-orange)
 ![No dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
-![Self-tests](https://img.shields.io/badge/self--tests-404%20passing-success)
+![Self-tests](https://img.shields.io/badge/self--tests-416%20passing-success)
 ![License MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
 ![WinExplorer](docs/screenshots/main-light.png)
@@ -66,9 +66,9 @@ SwiftUI + AppKit, built as a plain SwiftPM executable (there is no `.xcodeproj`)
 - **Built-in run log** at `~/Library/Logs/WinExplorer/` with main-thread hang detection and
   `fd` / thread / memory sampling — because "it broke after a while" is not a bug report you
   can act on
-- **404 self-test assertions**, runnable in one command, exercising real files in a temporary
+- **416 self-test assertions**, runnable in one command, exercising real files in a temporary
   directory (no mocks)
-- **22 ADRs** in [`docs/adr/`](docs/adr) recording every non-obvious decision — including the
+- **25 ADRs** in [`docs/adr/`](docs/adr) recording every non-obvious decision — including the
   ones that were later reverted
 
 ## Screenshots
@@ -134,7 +134,7 @@ Every build ships with an in-process test suite:
 
 ```bash
 WINEXPLORER_SELFTEST=1 build/WinExplorer.app/Contents/MacOS/WinExplorer
-# → 404 assertions, ends with "SELFTEST OK"
+# → 416 assertions, ends with "SELFTEST OK"
 ```
 
 Add `WINEXPLORER_LANG=en` for the English pass. The tests build a real directory tree in the

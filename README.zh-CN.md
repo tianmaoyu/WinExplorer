@@ -5,7 +5,7 @@
 ![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)
 ![Swift 5.9](https://img.shields.io/badge/Swift-5.9-orange)
 ![无依赖](https://img.shields.io/badge/dependencies-none-brightgreen)
-![自检](https://img.shields.io/badge/self--tests-404%20passing-success)
+![自检](https://img.shields.io/badge/self--tests-416%20passing-success)
 ![许可](https://img.shields.io/badge/license-MIT-lightgrey)
 
 ![WinExplorer](docs/screenshots/main-light.png)
@@ -21,7 +21,7 @@ English version: [README.md](README.md)。
 <kbd>Backspace</kbd> 不返回上一级。
 
 WinExplorer 是一个原生 macOS 应用：在该像资源管理器的地方像资源管理器，在观感上仍然
-属于 Mac。不是移植，也不是 Electron 套壳 —— 约 1.37 万行 Swift，SwiftUI + AppKit，
+属于 Mac。不是移植，也不是 Electron 套壳 —— 约 1.44 万行 Swift，SwiftUI + AppKit，
 纯 SwiftPM 构建（**没有 `.xcodeproj`**）。
 
 ## 功能
@@ -58,8 +58,8 @@ WinExplorer 是一个原生 macOS 应用：在该像资源管理器的地方像�
   网络卷卡住也不会冻住窗口
 - **内置运行日志**：`~/Library/Logs/WinExplorer/`，含主线程卡顿检测与
   `fd` / 线程 / 内存采样 —— 「用一会儿就坏了」这种描述没法排查，日志可以
-- **404 条自检断言**，一条命令跑完，全部操作真实临时目录里的文件（不用 mock）
-- **22 篇 ADR**（[`docs/adr/`](docs/adr)）记录每个不显然的决定，包括后来被推翻的那些
+- **416 条自检断言**，一条命令跑完，全部操作真实临时目录里的文件（不用 mock）
+- **25 篇 ADR**（[`docs/adr/`](docs/adr)）记录每个不显然的决定，包括后来被推翻的那些
 
 ## 截图
 
@@ -123,7 +123,7 @@ open build/WinExplorer.app
 
 ```bash
 WINEXPLORER_SELFTEST=1 build/WinExplorer.app/Contents/MacOS/WinExplorer
-# → 404 条断言，最后输出 SELFTEST OK
+# → 416 条断言，最后输出 SELFTEST OK
 ```
 
 加 `WINEXPLORER_LANG=en` 跑英文一遍。测试会在系统临时目录里建一棵真实目录树，
