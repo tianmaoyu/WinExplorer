@@ -82,9 +82,12 @@ struct SidebarView: View {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
     }
 
+    /// 选中态读 `selectionURL` 而不是 `currentURL`（adr/0025）：
+    /// `currentURL` 要等后台读完成才更新，拿它当选中态会先被回读成旧目录，
+    /// 界面就会出现「b → a → b」的闪烁。
     private var selectionBinding: Binding<URL?> {
         Binding(
-            get: { model.currentURL },
+            get: { model.selectionURL },
             set: { newValue in
                 if let url = newValue {
                     model.navigate(to: url)

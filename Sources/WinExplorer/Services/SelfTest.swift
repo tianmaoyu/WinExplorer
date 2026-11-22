@@ -1418,6 +1418,52 @@ enum SelfTest {
               model.currentURL.standardizedFileURL == folderC.standardizedFileURL,
               "实际 \(model.currentURL.lastPathComponent)")
 
+        // 侧边栏选中态：点了就跟着走，不能先回读成旧目录（adr/0025）
+        let selA = root.appendingPathComponent("sela")
+        let selB = root.appendingPathComponent("selb")
+        try? fm.createDirectory(at: selA, withIntermediateDirectories: false)
+        try? fm.createDirectory(at: selB, withIntermediateDirectories: false)
+
+        func pumpUntilLoaded(_ timeout: TimeInterval = 3) {
+            let deadline = Date().addingTimeInterval(timeout)
+            while model.isLoadingDirectory, Date() < deadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+            }
+        }
+
+        model.navigate(to: selA)
+        pumpUntilLoaded()
+        check("侧边栏：先落在 a", model.currentURL.standardizedFileURL.path == selA.standardizedFileURL.path,
+              "current=\(model.currentURL.lastPathComponent)")
+
+        model.navigate(to: selB)
+        check("侧边栏：点击后选中态立刻指向 b，不等读取完成（adr/0025）",
+              model.selectionURL.standardizedFileURL.path == selB.standardizedFileURL.path,
+              "selection=\(model.selectionURL.lastPathComponent)")
+        check("侧边栏：读取期间 currentURL 仍是 a —— 直接拿它当选中态就会闪回",
+              model.currentURL.standardizedFileURL.path == selA.standardizedFileURL.path,
+              "current=\(model.currentURL.lastPathComponent)")
+
+        pumpUntilLoaded()
+        check("侧边栏：读完稳定停在 b，没有二次跳转",
+              model.selectionURL.standardizedFileURL.path == selB.standardizedFileURL.path
+                && model.currentURL.standardizedFileURL.path == selB.standardizedFileURL.path,
+              "selection=\(model.selectionURL.lastPathComponent) current=\(model.currentURL.lastPathComponent)")
+
+        // 连续快速切换：中间那几次都不能把选中态拽回去
+        model.navigate(to: selA)
+        model.navigate(to: selB)
+        model.navigate(to: selA)
+        model.navigate(to: selB)
+        check("侧边栏：连续快速切换时选中态只跟最后一次点击",
+              model.selectionURL.standardizedFileURL.path == selB.standardizedFileURL.path,
+              "selection=\(model.selectionURL.lastPathComponent)")
+        pumpUntilLoaded()
+        check("侧边栏：快速切换结束后仍停在 b（选中态与当前目录一致）",
+              model.selectionURL.standardizedFileURL.path == selB.standardizedFileURL.path
+                && model.currentURL.standardizedFileURL.path == selB.standardizedFileURL.path,
+              "selection=\(model.selectionURL.lastPathComponent) current=\(model.currentURL.lastPathComponent)")
+
         // 还原：同步模式 + 回到测试根目录，后面的用例依赖这份列表
         BrowserModel.loadsDirectorySynchronously = true
         model.navigate(to: root)

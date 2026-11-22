@@ -38,6 +38,13 @@ final class BrowserModel: ObservableObject {
     let tabID = UUID()
 
     @Published private(set) var currentURL: URL
+    /// 正在前往、还没读出来的目录（adr/0025）。
+    /// `currentURL` 只在读取成功后落地，若侧边栏直接拿它当选中态，
+    /// 就会出现「点了 b → 选中态被回读成 a → 读完再跳回 b」的闪烁：
+    /// `List` 已经把选中画到 b，回读却还是 a。
+    @Published private(set) var pendingURL: URL?
+    /// 侧边栏这类「导航选中态」应该显示的位置：前往中的目录优先。
+    var selectionURL: URL { pendingURL ?? currentURL }
     @Published private(set) var items: [FileItem] = []
     @Published private(set) var errorMessage: String?
     /// 目录正在后台读取（状态栏显示小转圈，避免"点了没反应"的错觉）
@@ -673,6 +680,8 @@ final class BrowserModel: ObservableObject {
         loadGeneration += 1
         let generation = loadGeneration
         isLoadingDirectory = true
+        // 选中态先跟着点击走，读完再以磁盘结果为准（adr/0025）
+        pendingURL = standardized
         RunLog.shared.log(.load, "开始 gen=\(generation) \(standardized.path) sync=\(Self.loadsDirectorySynchronously)")
 
         // 自检：同步读，保持「构造完 / navigate 完立刻断言」的写法
@@ -719,6 +728,8 @@ final class BrowserModel: ObservableObject {
                 RunLog.shared.log(.load, "看门狗判定超时 gen=\(generation) \(url.path)")
                 self.loadAttempts = 0
                 self.isLoadingDirectory = false
+                // 超时等于没去成：选中态回到真实目录（adr/0025）
+                self.pendingURL = nil
                 self.errorMessage = L(
                     "读取「\(url.lastPathComponent)」超时，请重试",
                     "Timed out reading “\(url.lastPathComponent)” — try again"
@@ -754,6 +765,8 @@ final class BrowserModel: ObservableObject {
                 forwardStack.removeAll()
             }
             currentURL = url
+            // 先落 currentURL 再清 pending：同一帧里两者不会出现「都不是这个目录」的瞬间
+            pendingURL = nil
             allItems = loaded
             invalidateSortCache()
             directorySignature = Self.signature(of: loaded)
@@ -781,6 +794,8 @@ final class BrowserModel: ObservableObject {
             // 压缩/解压完成后要选中新产物：那时列表可能还没读完，读完后补一次
             applyPendingReveal()
         case .failure(let error):
+            // 没去成：选中态退回真实所在目录，否则侧边栏会一直指着个没打开的地方
+            pendingURL = nil
             // 权限问题不弹系统横幅式的错误条，改成窗口内的授权浮层：
             // 用户需要的是「怎么授权」，不是一行 error.localizedDescription
             if PermissionService.isPermissionDenied(error) {

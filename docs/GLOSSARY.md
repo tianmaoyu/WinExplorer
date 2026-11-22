@@ -113,5 +113,6 @@
 | **树读取失败态** | 子项读取失败单独记在 `treeFailures`，**不写空数组**：失败与「真的空」必须可区分，且不能抹掉上次读成功的内容 | `BrowserModel.treeLoadError(_:)`（adr/0024） |
 | **代次（树读取）** | 每个路径一个自增号；超时、重试、换目录后迟到的读取结果靠它整包丢弃 | `BrowserModel.treeLoadGeneration`（adr/0024） |
 | **force 排队补读** | 读取进行中又收到强制刷新时不丢弃，记进 `pendingForcedKeys`，本次读完后立刻补读一次 | `BrowserModel.ensureChildrenLoaded(_:force:)`（adr/0024） |
+| **pendingURL** | 正在前往、还没读出来的目录：`currentURL` 要等读完才落地，导航选中态必须读它才不会闪回旧目录 | `BrowserModel.selectionURL`（adr/0025） |
 | **范围选择** | Shift 点击以锚点为准选中可见行的一段；下标与取值必须同源（`visibleItems`），否则越界或错位 | `BrowserModel.handleClick`（adr/0023） |
 
