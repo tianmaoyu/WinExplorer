@@ -501,6 +501,7 @@ struct FileListView: View {
                 depth: row.depth,
                 isExpanded: row.isExpanded,
                 isTreeLoading: model.isTreeLoading(item.url),
+                treeError: model.treeLoadError(item.url),
                 onToggleExpand: { model.toggleExpanded(item.url) }
             )
             .frame(height: FileListLayout.rowHeight)
@@ -911,6 +912,8 @@ struct FileRow: View {
     var isExpanded: Bool = false
     /// 子项正在后台读取
     var isTreeLoading: Bool = false
+    /// 上次读取子项失败的原因（nil = 没失败过，adr/0024）
+    var treeError: String?
     var onToggleExpand: (() -> Void)?
 
     @State private var hovered = false
@@ -999,6 +1002,10 @@ struct FileRow: View {
                         ProgressView()
                             .controlSize(.mini)
                             .scaleEffect(0.6)
+                    } else if treeError != nil {
+                        // 读失败不能长得像「空文件夹」：给个警告，说明这一层是没读到
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 9))
                     } else {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 8, weight: .bold))
@@ -1012,12 +1019,24 @@ struct FileRow: View {
             .buttonStyle(.plain)
             .foregroundStyle(isSelected ? Color.white.opacity(0.85) : Color.secondary)
             .animation(.easeInOut(duration: 0.12), value: isExpanded)
-            .help(isExpanded ? L("折叠", "Collapse") : L("展开", "Expand"))
+            .help(disclosureHelp)
         } else {
             Color.clear
                 .frame(width: FileListLayout.treeDisclosureWidth,
                        height: FileListLayout.treeDisclosureWidth)
         }
+    }
+
+    /// 三角的悬停提示：失败时说清原因（adr/0024），否则就是折叠 / 展开
+    private var disclosureHelp: String {
+        if isTreeLoading { return L("正在读取…", "Loading…") }
+        if let treeError {
+            return L(
+                "这一层没读到：\(treeError)。折叠后重新展开即可重试",
+                "Couldn’t read this folder: \(treeError). Collapse and expand again to retry"
+            )
+        }
+        return isExpanded ? L("折叠", "Collapse") : L("展开", "Expand")
     }
 
     /// 悬停提示：未授权项直接说清楚"打开时会提示授权"，避免用户以为是坏了

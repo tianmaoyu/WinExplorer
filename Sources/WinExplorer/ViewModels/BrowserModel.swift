@@ -51,8 +51,20 @@ final class BrowserModel: ObservableObject {
     /// 否则重新展开这个文件夹时，里面的子节点会「记着」上次是展开的。
     @Published private(set) var expandedPaths: Set<String> = []
     /// 展开过的文件夹里有什么（key: 标准化路径）。
-    /// 读过的空目录也会写进来（空数组），用来区分「没读过」和「读了但没有」。
+    /// **只放读成功的结果**（确实空的目录是空数组）。读失败绝不写这里：
+    /// 写空数组会让「瞬时读失败」和「真的空」无法区分，还会把上一次读成功的
+    /// 内容一起抹掉，界面当场塌陷（adr/0024）。
     private var treeChildren: [String: [FileItem]] = [:]
+    /// 最近一次读取失败的目录（key → 失败信息）。与 `treeChildren` 并存：
+    /// 失败时旧内容继续显示，状态单独记，不再让「空目录」背锅（adr/0024）。
+    private var treeFailures: [String: TreeLoadFailure] = [:]
+    /// 每个 key 的读取代数：超时、重试、迟到的结果都靠它作废（adr/0024）
+    private var treeLoadGeneration: [String: Int] = [:]
+    /// 读取进行中又收到 force 请求 → 本次读完后补读一次，不能直接丢掉（adr/0024）
+    private var pendingForcedKeys: Set<String> = []
+    /// 每个 key 的超时看门狗 / 退避重扫任务
+    private var treeWatchdogs: [String: DispatchWorkItem] = [:]
+    private var treeRetries: [String: DispatchWorkItem] = [:]
     /// 正在后台读取的文件夹（行上显示小转圈）
     @Published private(set) var loadingTreePaths: Set<String> = []
     /// 扁平化后的可见行：`LazyVStack` 直接渲染这个
@@ -833,7 +845,7 @@ final class BrowserModel: ObservableObject {
 
     /// 一行摘要：数据侧（items）与界面侧（rows）必须对得上
     var diagnosticsSummary: String {
-        "items=\(items.count) rows=\(treeRows.count) expanded=\(expandedPaths.count) loading=\(loadingTreePaths.count) search=\(isSearching ? 1 : 0) hidden=\(showHidden ? 1 : 0)"
+        "items=\(items.count) rows=\(treeRows.count) expanded=\(expandedPaths.count) loading=\(loadingTreePaths.count) failed=\(treeFailures.count) search=\(isSearching ? 1 : 0) hidden=\(showHidden ? 1 : 0)"
     }
 
     /// 展开 / 折叠一个文件夹
@@ -870,33 +882,148 @@ final class BrowserModel: ObservableObject {
         url.standardizedFileURL.path
     }
 
+    /// 子树读取失败的记录（adr/0024）
+    private struct TreeLoadFailure {
+        var message: String
+        /// 连续失败次数，决定还要不要继续退避重扫
+        var attempts: Int
+    }
+
+    /// 子树读取超时（秒）。主目录读取的看门狗同样是 5s（adr/0013）
+    private static let treeLoadTimeout: TimeInterval = 5
+    /// 失败后的补偿重扫间隔：指数退避，最多三次（adr/0024）
+    private static let treeRetryDelays: [TimeInterval] = [0.5, 1.5, 4]
+
+    /// 这个文件夹上次读取失败的原因（nil = 没失败过）。
+    /// 视图拿它在行上标一个警告，用户就不会再把「读失败」当成「空文件夹」。
+    func treeLoadError(_ url: URL) -> String? {
+        treeFailures[Self.treeKey(url)]?.message
+    }
+
     /// 读某个文件夹的子项（已有缓存就直接用）
     private func ensureChildrenLoaded(_ url: URL, force: Bool = false) {
         let key = Self.treeKey(url)
-        guard !loadingTreePaths.contains(key) else { return }
+        if loadingTreePaths.contains(key) {
+            // 读已经在飞：**force 请求不能丢**，否则「展开的同时往里面新建 / 拖入」
+            // 看到的是建目录之前那次读的结果（adr/0021 的又一次变体，adr/0024）。
+            // 记下来，本次读完后补读一次。
+            if force { pendingForcedKeys.insert(key) }
+            RunLog.shared.note(.load, "子树读取进行中，force 请求排队 key=\(key)")
+            return
+        }
         guard force || treeChildren[key] == nil else { return }
+        startTreeLoad(url, key: key)
+    }
+
+    /// 真正发起一次子树读取（调用前保证 `loadingTreePaths` 里没有这个 key）
+    private func startTreeLoad(_ url: URL, key: String) {
+        pendingForcedKeys.remove(key)
+        treeRetries[key]?.cancel()
+        treeRetries[key] = nil
         loadingTreePaths.insert(key)
+
+        let generation = (treeLoadGeneration[key] ?? 0) + 1
+        treeLoadGeneration[key] = generation
+
+        // 超时兜底：掉线的网络卷 / 卡住的 FUSE 会让 contents 永不返回，
+        // 主目录读取有看门狗（adr/0013），子树这边同样需要一个，
+        // 否则 loading 锁永远不放，之后所有刷新都会被排队吞掉（adr/0024）。
+        let watchdog = DispatchWorkItem { [weak self] in
+            guard let self,
+                  self.treeLoadGeneration[key] == generation,
+                  self.loadingTreePaths.contains(key) else { return }
+            // 代次 +1：这次读迟到的结果回来也不会再写缓存
+            self.treeLoadGeneration[key] = generation + 1
+            self.loadingTreePaths.remove(key)
+            RunLog.shared.log(.load, "子树读取超时 \(Int(Self.treeLoadTimeout))s \(url.path)")
+            self.treeLoadDidFail(url, key: key, message: L("读取超时", "Timed out"))
+        }
+        treeWatchdogs[key] = watchdog
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.treeLoadTimeout, execute: watchdog)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = Result { try FileSystemService.contents(of: url) }
             DispatchQueue.main.async {
                 guard let self else { return }
+                // 代次不符 = 超时 / 重试 / 换目录之后的迟到结果，整包丢弃
+                guard self.treeLoadGeneration[key] == generation else {
+                    RunLog.shared.note(.load, "丢弃过期的子树结果 key=\(key)")
+                    return
+                }
+                self.treeWatchdogs[key] = nil
                 self.loadingTreePaths.remove(key)
+
                 switch result {
                 case .success(let children):
+                    self.treeFailures[key] = nil
                     self.treeChildren[key] = children
+                    RunLog.shared.log(.load, "子树读取完成 key=\(key) items=\(children.count)")
                 case .failure(let error):
-                    RunLog.shared.log(.load, "展开目录失败 \(url.path) err=\(error.localizedDescription)")
-                    // 记为「读过但没有」：免得每次重建都再发起一次必然失败的读取
-                    self.treeChildren[key] = []
+                    self.treeLoadDidFail(url, key: key, message: error.localizedDescription)
                 }
+
+                let needsReread = self.pendingForcedKeys.remove(key) != nil
                 if self.expandedPaths.contains(key) {
                     self.rebuildTreeRows()
                     // 刚新建/移动进来的项可能就在这一层，读完顺手选中它
                     if self.pendingRevealURL != nil { self.applyPendingReveal() }
                 }
+                if needsReread {
+                    RunLog.shared.note(.load, "补读排队的 force 请求 key=\(key)")
+                    self.ensureChildrenLoaded(url, force: true)
+                }
             }
         }
+    }
+
+    /// 子树读取失败：只记状态、不写空缓存，并按指数退避补扫（adr/0024）
+    private func treeLoadDidFail(_ url: URL, key: String, message: String) {
+        let attempts = (treeFailures[key]?.attempts ?? 0) + 1
+        treeFailures[key] = TreeLoadFailure(message: message, attempts: attempts)
+        let kept = treeChildren[key].map { "\($0.count)" } ?? "无"
+        RunLog.shared.log(.load, "子树读取失败 #\(attempts) \(url.path) err=\(message) 保留旧内容=\(kept)")
+
+        guard attempts <= Self.treeRetryDelays.count else {
+            RunLog.shared.log(.load, "放弃自动重扫（已失败 \(attempts) 次） \(url.path)")
+            return
+        }
+        scheduleTreeRetry(url, key: key, attempt: attempts)
+    }
+
+    private func scheduleTreeRetry(_ url: URL, key: String, attempt: Int) {
+        treeRetries[key]?.cancel()
+        let delay = Self.treeRetryDelays[attempt - 1]
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.expandedPaths.contains(key) else { return }
+            RunLog.shared.note(.load, "重扫失败的子树 #\(attempt + 1) key=\(key)")
+            self.ensureChildrenLoaded(url, force: true)
+        }
+        treeRetries[key] = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// 清掉整棵树的缓存与在途状态（换目录 / 全部收起时）。
+    /// `loadingTreePaths` 必须一起清：在途的读取回来后代次对不上会整包丢弃，
+    /// 没人再来摘这个锁，转圈就会一直转（adr/0024）。
+    private func resetTreeCache() {
+        treeChildren.removeAll()
+        treeFailures.removeAll()
+        treeLoadGeneration.removeAll()
+        pendingForcedKeys.removeAll()
+        loadingTreePaths.removeAll()
+        treeWatchdogs.values.forEach { $0.cancel() }
+        treeWatchdogs.removeAll()
+        treeRetries.values.forEach { $0.cancel() }
+        treeRetries.removeAll()
+    }
+
+    /// 缓存上限：一个会话里展开过的目录会一直留着，超了就丢折叠着的那些
+    /// （它们再展开时本来就会 force 重读，丢了不影响正确性）
+    private func pruneTreeCacheIfNeeded() {
+        let limit = 300
+        guard treeChildren.count > limit else { return }
+        treeChildren = treeChildren.filter { expandedPaths.contains($0.key) }
+        RunLog.shared.log(.perf, "清理陈旧子树缓存 剩余=\(treeChildren.count)")
     }
 
     /// 扁平化：当前层的可见项按顺序排开，展开的文件夹后面紧跟着它的子项
@@ -950,7 +1077,7 @@ final class BrowserModel: ObservableObject {
     /// - `keepingExpansion == false`：连展开状态一起清掉（换了目录）
     private func invalidateTreeCache(keepingExpansion: Bool) {
         guard keepingExpansion else {
-            treeChildren.removeAll()
+            resetTreeCache()
             expandedPaths.removeAll()
             return
         }
@@ -962,6 +1089,13 @@ final class BrowserModel: ObservableObject {
         // 被删掉的文件夹仍要从展开集合里剔掉，否则每次刷新都去读一个不存在的路径。
         let fm = FileManager.default
         expandedPaths = expandedPaths.filter { fm.fileExists(atPath: $0) }
+        // 同一个路径的失败记录 / 重试任务跟着走：目录都没了，重扫只会白跑一次
+        for key in Array(treeFailures.keys) where !fm.fileExists(atPath: key) {
+            treeFailures[key] = nil
+            treeRetries[key]?.cancel()
+            treeRetries[key] = nil
+        }
+        pruneTreeCacheIfNeeded()
     }
 
     /// 把已展开的目录重新读一遍（刷新后子树内容可能变了）
@@ -1015,9 +1149,9 @@ final class BrowserModel: ObservableObject {
 
     /// 全部收起（切到列表 / 图标视图时用，那时不展示层级）
     func collapseAllTreeNodes() {
-        guard !expandedPaths.isEmpty else { return }
+        guard !expandedPaths.isEmpty || !treeChildren.isEmpty || !treeFailures.isEmpty else { return }
         expandedPaths.removeAll()
-        treeChildren.removeAll()
+        resetTreeCache()
         rebuildTreeRows()
     }
 

@@ -1476,6 +1476,66 @@ enum SelfTest {
         check("树形：刷新后子项仍在", model.treeRows.count == rowsBeforeRefresh)
         model.toggleExpanded(treeSub)
 
+        // MARK: 子树读取失败（adr/0024）
+
+        /// 等某个条件成立（定时器 / 后台读都要靠跑 RunLoop 才能推进）
+        func waitUntil(_ timeout: TimeInterval, _ condition: () -> Bool) {
+            let deadline = Date().addingTimeInterval(timeout)
+            while !condition(), Date() < deadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            }
+        }
+
+        let failRoot = root.appendingPathComponent("failroot")
+        let failSub = failRoot.appendingPathComponent("sub")
+        try? fm.createDirectory(at: failSub.appendingPathComponent("inner"),
+                                withIntermediateDirectories: true)
+        fm.createFile(atPath: failSub.appendingPathComponent("a.txt").path, contents: Data("x".utf8))
+        model.navigate(to: failRoot)
+        model.toggleExpanded(failSub)
+        waitForChildren(failSub)
+        let failRowsGood = model.treeRows.count
+        check("树形：读失败用例的初始状态", failRowsGood == 3 && model.treeLoadError(failSub) == nil,
+              "rows=\(failRowsGood)")
+
+        // 让这次重读必然失败（权限被收走 = 网络卷掉线的等价物），
+        // 再靠相邻目录的改动触发一次同目录刷新
+        chmod(failSub.path, 0o000)
+        fm.createFile(atPath: failRoot.appendingPathComponent("trigger.txt").path, contents: Data("x".utf8))
+        model.refreshFromDisk()
+        waitForChildren(failSub)
+
+        check("树形：读失败不会把已读成功的子项抹掉（adr/0024）",
+              model.treeRows.contains { $0.item.name == "a.txt" },
+              "rows=\(model.treeRows.map(\.item.name))")
+        check("树形：读失败被单独记下来，不再伪装成空目录",
+              model.treeLoadError(failSub) != nil,
+              "error=\(model.treeLoadError(failSub) ?? "nil")")
+        check("树形：读失败不会把 loading 锁留在界面上", !model.isTreeLoading(failSub))
+
+        // 恢复权限：不做任何手动操作，等退避重扫自愈
+        chmod(failSub.path, 0o755)
+        waitUntil(6) { model.treeLoadError(failSub) == nil }
+        check("树形：失败子树会自己重扫恢复（adr/0024）",
+              model.treeLoadError(failSub) == nil && model.treeRows.contains { $0.item.name == "a.txt" },
+              "error=\(model.treeLoadError(failSub) ?? "nil") rows=\(model.treeRows.map(\.item.name))")
+
+        // 读已经在飞的时候又来一个 force：不能吞，读完要补读一次（adr/0024）
+        let swRoot = root.appendingPathComponent("swallow")
+        let swSub = swRoot.appendingPathComponent("target")
+        try? fm.createDirectory(at: swSub, withIntermediateDirectories: true)
+        model.navigate(to: swRoot)
+        model.toggleExpanded(swSub)
+        // 后台读已经读完，结果还排在 main 队列里没落地
+        Thread.sleep(forTimeInterval: 0.2)
+        let wasLoading = model.isTreeLoading(swSub)
+        model.createFolder(in: swSub)
+        waitUntil(3) { model.treeRows.contains { $0.item.name == L("新建文件夹", "New Folder") } }
+        check("树形：读取进行中收到的 force 请求会补读，不会丢（adr/0024）",
+              wasLoading && model.treeRows.contains { $0.item.name == L("新建文件夹", "New Folder") },
+              "loading=\(wasLoading) rows=\(model.treeRows.map(\.item.name))")
+        model.navigate(to: root)
+
         // 向指定文件夹添加：右键菜单传的就是这个参数
         model.createFolder(in: treeSub)
         check("树形：新建落在指定文件夹里",
