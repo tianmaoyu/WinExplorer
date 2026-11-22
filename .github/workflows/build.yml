@@ -7,7 +7,11 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    # macos-14 镜像已于 2026-11-02 被 GitHub 退役：任务在派发阶段就被拒，
+    # runner 从不分配，运行会在 1s 内以 cancelled 结束，注解是
+    # "The configuration 'macos-14-arm64-us-default' is not supported"。
+    # 换成 macos-15（Apple Silicon），别改回去。
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
