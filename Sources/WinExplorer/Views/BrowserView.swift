@@ -397,20 +397,9 @@ struct BrowserView: View {
             .help(L("视图模式（⌘1 详细信息 / ⌘2 列表 / ⌘3 图标）",
                     "View mode (⌘1 Details / ⌘2 List / ⌘3 Icons)"))
 
-            Button {
-                model.paste()
-            } label: {
-                Label(L("粘贴", "Paste"), systemImage: "doc.on.clipboard")
-            }
-            .disabled(!model.canPaste || model.isTransferring)
-            .help(L("粘贴到当前文件夹（⌘V）", "Paste into this folder (⌘V)"))
-
-            Button {
-                model.createFolder()
-            } label: {
-                Label(L("新建文件夹", "New Folder"), systemImage: "folder.badge.plus")
-            }
-            .help(L("新建文件夹（⇧⌘N）", "New Folder (⇧⌘N)"))
+            // 「粘贴」「新建文件夹」两个按钮已从工具栏移除（adr/0026）：
+            // 它们分别是低频动作，且右键菜单 / 文件菜单里都有，快捷键也没变
+            //（⌘V / ⇧⌘N）。工具栏只留视图模式与「更多」菜单，右侧分组更紧凑。
 
             Menu {
                 Section(L("视图模式", "View Mode")) {
