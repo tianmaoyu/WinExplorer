@@ -1,0 +1,93 @@
+name: Release
+
+# 打 tag（v1.5.6）就自动出包并挂到 GitHub Release，别人直接点开下载。
+# 也可以在 Actions 页面手动跑，填一个已存在的 tag 重新上传（覆盖同名资产）。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "已存在的 tag，例如 v1.5.6"
+        required: true
+        type: string
+
+# 仓库默认 workflow 权限是 read，创建 Release / 上传资产必须显式给 write
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # macos-14 镜像已于 2026-11-02 退役，必须用 macos-15（arm64）
+    runs-on: macos-15
+    steps:
+      # 手动触发时也要构建 tag 指向的那份代码，而不是分支头
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Resolve version
+        id: ver
+        run: |
+          set -euo pipefail
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Support/Info.plist)
+          TAG="${{ inputs.tag }}"
+          if [ -z "$TAG" ]; then TAG="${GITHUB_REF_NAME}"; fi
+          if [ "v$VERSION" != "$TAG" ]; then
+            echo "::error::tag $TAG 与 Support/Info.plist 里的版本 $VERSION 不一致（应为 v$VERSION）"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "版本 $VERSION，tag $TAG"
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Build app bundle
+        run: ./scripts/build_app.sh release
+
+      - name: Package DMG
+        run: ./scripts/package_dmg.sh
+
+      - name: Package PKG
+        run: ./scripts/package_pkg.sh
+
+      # 自测是发布前的闸门：这里**不**用 continue-on-error。
+      # 自检失败会以非 0 退出，但为了让人一眼看到是哪几条挂了，还是单独抓 FAIL 行。
+      - name: Self-tests (release gate)
+        run: |
+          set -o pipefail
+          WINEXPLORER_SELFTEST=1 WINEXPLORER_LANG=en \
+            build/WinExplorer.app/Contents/MacOS/WinExplorer > selftest.log 2>&1 || true
+          if ! grep -q "SELFTEST OK" selftest.log; then
+            echo "::error::自测未通过，已阻止发布"
+            grep -E "^FAIL|SELFTEST" selftest.log | head -40
+            exit 1
+          fi
+          echo "自测通过：$(grep -c '^PASS' selftest.log) 条断言"
+
+      - name: Upload to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.ver.outputs.tag }}"
+          VERSION="${{ steps.ver.outputs.version }}"
+          NOTES="docs/release-notes-$VERSION.md"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "==> Release $TAG 已存在，覆盖上传资产"
+            gh release upload "$TAG" build/*.dmg build/*.pkg --clobber
+          elif [ -f "$NOTES" ]; then
+            echo "==> 新建 Release $TAG（说明来自 $NOTES）"
+            gh release create "$TAG" build/*.dmg build/*.pkg \
+              --title "WinExplorer $VERSION" --notes-file "$NOTES"
+          else
+            echo "==> 新建 Release $TAG（没有 $NOTES，用自动生成的说明）"
+            gh release create "$TAG" build/*.dmg build/*.pkg \
+              --title "WinExplorer $VERSION" --generate-notes
+          fi
+
+          echo "==> 完成：$(gh release view "$TAG" --json url --jq .url)"
+          gh release view "$TAG" --json assets --jq '.assets[] | "  \(.name)  \(.size) B"'
