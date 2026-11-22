@@ -34,12 +34,12 @@ jobs:
           TAG="${{ inputs.tag }}"
           if [ -z "$TAG" ]; then TAG="${GITHUB_REF_NAME}"; fi
           if [ "v$VERSION" != "$TAG" ]; then
-            echo "::error::tag $TAG 与 Support/Info.plist 里的版本 $VERSION 不一致（应为 v$VERSION）"
+            echo "::error::tag ${TAG} 与 Support/Info.plist 里的版本 ${VERSION} 不一致（应为 v${VERSION}）"
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "版本 $VERSION，tag $TAG"
+          echo "版本 ${VERSION}，tag ${TAG}"
 
       - name: Show toolchain
         run: swift --version
@@ -77,14 +77,14 @@ jobs:
           NOTES="docs/release-notes-$VERSION.md"
 
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "==> Release $TAG 已存在，覆盖上传资产"
+            echo "==> Release ${TAG} 已存在，覆盖上传资产"
             gh release upload "$TAG" build/*.dmg build/*.pkg --clobber
           elif [ -f "$NOTES" ]; then
-            echo "==> 新建 Release $TAG（说明来自 $NOTES）"
+            echo "==> 新建 Release ${TAG}（说明来自 ${NOTES}）"
             gh release create "$TAG" build/*.dmg build/*.pkg \
               --title "WinExplorer $VERSION" --notes-file "$NOTES"
           else
-            echo "==> 新建 Release $TAG（没有 $NOTES，用自动生成的说明）"
+            echo "==> 新建 Release ${TAG}（没有 ${NOTES}，用自动生成的说明）"
             gh release create "$TAG" build/*.dmg build/*.pkg \
               --title "WinExplorer $VERSION" --generate-notes
           fi
