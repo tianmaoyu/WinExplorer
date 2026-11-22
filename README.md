@@ -9,6 +9,7 @@
 ![License MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
 ![WinExplorer](docs/screenshots/main-light.png)
+![WinExplorer](docs/整段-480-12fps-bayer-128色-极小.gif)
 
 中文说明见 [README.zh-CN.md](README.zh-CN.md)。
 
